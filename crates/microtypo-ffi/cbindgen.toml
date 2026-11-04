@@ -1,0 +1,16 @@
+language = "C"
+include_guard = "MICROTYPO_H"
+cpp_compat = true
+no_includes = true
+sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
+usize_is_size_t = true
+style = "both"
+documentation = false
+
+[export.rename]
+"Engine" = "microtypo_engine"
+"Error" = "microtypo_error"
+"Output" = "microtypo_output"
+
+[fn]
+args = "auto"

@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+exclude = ["vendor/regress", "spike"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+authors = ["Alexey Simonenko <alexey@simonenko.dev>"]
+repository = "https://github.com/meritt/microtypo.rs"
+publish = false
+
+[workspace.dependencies]
+microtypo-core = { path = "crates/microtypo-core" }
+regress = { path = "vendor/regress", default-features = false, features = ["std", "utf16"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+getrandom = "0.4"
+js-sys = "0.3"
+wasm-bindgen = "=0.2.130"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+many_single_char_names = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+match_same_arms = "allow"
+needless_pass_by_value = "allow"
+option_option = "allow"
+ref_option = "allow"
+unnecessary_wraps = "allow"
+verbose_bit_mask = "allow"
+unreadable_literal = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.wasm]
+inherits = "release"
+opt-level = "s"

@@ -1,0 +1,4 @@
+module MicroTypoFFI {
+    header "microtypo.h"
+    export *
+}

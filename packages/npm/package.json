@@ -1,0 +1,55 @@
+{
+  "name": "@meritt/microtypo-wasm",
+  "version": "0.1.0",
+  "description": "Russian typography that never mangles your code, URLs, or markup: the Rust port of microtypo in WebAssembly, with the JavaScript API of microtypo",
+  "keywords": [
+    "cyrillic",
+    "nbsp",
+    "quotes",
+    "russian",
+    "russian-typography",
+    "typographer",
+    "typography",
+    "wasm",
+    "webassembly"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Alexey Simonenko",
+    "email": "alexey@simonenko.dev",
+    "url": "https://simonenko.xyz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meritt/microtypo.rs.git",
+    "directory": "packages/npm"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=26.13.0"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": "./microtypo.js",
+    "./microtypo.wasm": "./microtypo.wasm"
+  },
+  "files": [
+    "microtypo.js",
+    "microtypo.wasm"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^12.15.0",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "^26.13.0",
+      "onFail": "error"
+    }
+  }
+}

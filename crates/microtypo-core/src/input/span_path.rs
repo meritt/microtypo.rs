@@ -1,0 +1,162 @@
+use std::sync::{Arc, OnceLock};
+
+use crate::errors::Result;
+use crate::js::{self, JsString};
+use crate::protect::blocks::{Range, ScanCtx};
+
+pub type Next<'a> = Box<dyn FnMut(usize) -> Result<Option<(usize, usize, usize)>> + 'a>;
+
+pub type ReaderFor = Arc<dyn for<'a> Fn(&'a [u16], &'a ScanCtx<'a>) -> Result<Next<'a>> + Send + Sync>;
+
+pub fn collect_spans(next: &mut Next<'_>) -> Result<Vec<Range>> {
+    let mut spans = Vec::new();
+    let mut from = 0;
+    while let Some((start, end, after)) = next(from)? {
+        spans.push((start, end));
+        from = after;
+    }
+    Ok(spans)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Position {
+    Key(JsString),
+    Index(usize),
+}
+
+impl Position {
+    pub fn key(s: &[u16]) -> Self {
+        Position::Key(s.to_vec())
+    }
+
+    pub fn to_js(&self) -> JsString {
+        match self {
+            Position::Key(k) => k.clone(),
+            Position::Index(i) => js::num(*i),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ChainNode {
+    parent: Chain,
+    position: Position,
+    depth: usize,
+    pieces: OnceLock<Vec<JsString>>,
+}
+
+impl ChainNode {
+    fn pieces(&self) -> &[JsString] {
+        self.pieces
+            .get_or_init(|| js::split(&self.position.to_js(), &[0x2E]).into_iter().map(<[u16]>::to_vec).collect())
+    }
+}
+
+pub type Chain = Option<Arc<ChainNode>>;
+
+pub fn chain_append(base: &Chain, positions: impl IntoIterator<Item = Position>) -> Chain {
+    let mut chain = base.clone();
+    for position in positions {
+        let depth = chain.as_ref().map_or(0, |c| c.depth) + 1;
+        chain = Some(Arc::new(ChainNode { parent: chain, position, depth, pieces: OnceLock::new() }));
+    }
+    chain
+}
+
+fn materialize(chain: &Chain) -> Vec<JsString> {
+    let mut segments = Vec::new();
+    let mut node = chain.as_ref();
+    while let Some(n) = node {
+        segments.push(n.position.to_js());
+        node = n.parent.as_ref();
+    }
+    segments.reverse();
+    segments
+}
+
+#[derive(Debug, Clone)]
+pub struct LocatedSpan {
+    pub start: usize,
+    pub end: usize,
+    pub is_key: bool,
+    pub eligible: bool,
+    pub delim: JsString,
+    pub guard: Option<fn(&[u16]) -> bool>,
+    pub unaddressed: bool,
+    chain: Chain,
+}
+
+impl LocatedSpan {
+    pub fn new(start: usize, end: usize, is_key: bool, chain: Chain) -> Self {
+        LocatedSpan { start, end, is_key, eligible: true, delim: Vec::new(), guard: None, unaddressed: false, chain }
+    }
+
+    pub fn with(
+        start: usize,
+        end: usize,
+        is_key: bool,
+        chain: Chain,
+        eligible: bool,
+        delim: JsString,
+        guard: Option<fn(&[u16]) -> bool>,
+    ) -> Self {
+        LocatedSpan { start, end, is_key, eligible, delim, guard, unaddressed: false, chain }
+    }
+
+    pub fn chain(&self) -> &Chain {
+        &self.chain
+    }
+
+    pub fn segments(&self) -> Vec<JsString> {
+        materialize(&self.chain)
+    }
+
+    pub fn tail(&self) -> JsString {
+        self.chain.as_ref().map_or_else(Vec::new, |c| c.position.to_js())
+    }
+
+    pub fn path(&self) -> JsString {
+        js::join(&self.segments(), &[0x2E])
+    }
+
+    pub fn dotted_tail(&self) -> JsString {
+        self.chain.as_ref().map_or_else(Vec::new, |c| c.pieces().last().cloned().unwrap_or_default())
+    }
+
+    pub fn segments_match(&self, wanted: &[JsString]) -> bool {
+        let mut node = self.chain.as_ref();
+        if node.map_or(0, |n| n.depth) != wanted.len() {
+            return false;
+        }
+        for w in wanted.iter().rev() {
+            let n = node.expect("depth matches");
+            if w.as_slice() != [0x2A] && *w != n.position.to_js() {
+                return false;
+            }
+            node = n.parent.as_ref();
+        }
+        true
+    }
+
+    pub fn dotted_match(&self, wanted: &[JsString]) -> bool {
+        let mut i = wanted.len() as isize;
+        let mut node = self.chain.as_ref();
+        while let Some(n) = node {
+            for piece in n.pieces().iter().rev() {
+                i -= 1;
+                if i < 0 {
+                    return false;
+                }
+                let w = &wanted[i as usize];
+                if w.as_slice() != [0x2A] && w != piece {
+                    return false;
+                }
+            }
+            node = n.parent.as_ref();
+        }
+        if i == wanted.len() as isize {
+            return i == 1 && (wanted[0].as_slice() == [0x2A] || wanted[0].is_empty());
+        }
+        i == 0
+    }
+}
