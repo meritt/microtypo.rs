@@ -5,7 +5,7 @@ import PackageDescription
 
 let release = (
     url: "https://github.com/meritt/microtypo.rs/releases/download/v0.1.0/microtypo-v0.1.0-xcframework.zip",
-    checksum: "5bdaef1d31affed1c4e88b4eb5127b8e117c82a7558306eba52abea284b3eb8c"
+    checksum: "7f715fcc140c0e5d1202e93b3cc56e45934ca57f5e638a5f81f27c0b04befa4f"
 )
 
 let local = "packages/swift/MicroTypoFFI.xcframework"
