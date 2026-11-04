@@ -48,7 +48,7 @@ let text = try typo.process("\"Амбер\" - город")
 
 ## Автор
 
-[Алексей Симоненко](https://github.com/meritt)
+[Алексей Симоненко](https://simonenko.xyz)
 
 ## Лицензия
 
