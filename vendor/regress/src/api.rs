@@ -56,6 +56,10 @@ pub struct Flags {
 }
 
 impl Flags {
+    pub(crate) fn unicode_mode(self) -> bool {
+        self.unicode || self.unicode_sets
+    }
+
     /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline, 'u' means unicode.
     /// Note the 'g' flag implies a stateful regex and is not supported.
@@ -383,12 +387,38 @@ impl<'m> FusedIterator for NamedGroups<'m> {}
 /// A Regex is the compiled version of a pattern.
 #[derive(Debug, Clone)]
 pub struct Regex {
-    cr: CompiledRegex,
+    pub(crate) cr: CompiledRegex,
 }
 
 impl From<CompiledRegex> for Regex {
     fn from(cr: CompiledRegex) -> Self {
         Self { cr }
+    }
+}
+
+/// Where a regex gets the strings of UTF-16 code units every match contains one of, which a
+/// search scans for before it tries the regex.
+#[cfg(feature = "utf16")]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub enum FactorSource {
+    /// Read them off the pattern, and go without them if that takes more than this much work.
+    Analyze(usize),
+    /// Take what `codegen::factors` wrote out for the same pattern and flags.
+    Given(crate::aot::Factors),
+}
+
+#[cfg(feature = "utf16")]
+impl FactorSource {
+    /// The work `Analyze` gets by default, measured to keep the analysis of a pattern to about a
+    /// millisecond of a fast machine. Most patterns of a typographic rule set take far less.
+    pub const WORK: usize = 1 << 14;
+}
+
+#[cfg(feature = "utf16")]
+impl Default for FactorSource {
+    fn default() -> Self {
+        FactorSource::Analyze(Self::WORK)
     }
 }
 
@@ -424,12 +454,48 @@ impl Regex {
         I: Iterator<Item = u32> + Clone,
         F: Into<Flags>,
     {
-        let flags = flags.into();
-        let mut ire = parse::try_parse(pattern, flags)?;
+        Self::from_pattern(
+            pattern,
+            flags.into(),
+            false,
+            #[cfg(feature = "utf16")]
+            FactorSource::default(),
+        )
+    }
+
+    #[cfg(feature = "utf16")]
+    pub fn from_utf16<F: Into<Flags>>(pattern: &[u16], flags: F) -> Result<Regex, Error> {
+        Self::from_utf16_with(pattern, flags, FactorSource::default())
+    }
+
+    /// Construct a regex as `from_utf16` does, with the factor strings from \p factors.
+    #[cfg(feature = "utf16")]
+    #[doc(hidden)]
+    pub fn from_utf16_with<F: Into<Flags>>(
+        pattern: &[u16],
+        flags: F,
+        factors: FactorSource,
+    ) -> Result<Regex, Error> {
+        let points = char::decode_utf16(pattern.iter().copied())
+            .map(|c| c.map_or_else(|e| u32::from(e.unpaired_surrogate()), u32::from));
+        Self::from_pattern(points, flags.into(), true, factors)
+    }
+
+    fn from_pattern<I: Iterator<Item = u32> + Clone>(
+        pattern: I,
+        flags: Flags,
+        utf16_atoms: bool,
+        #[cfg(feature = "utf16")] factors: FactorSource,
+    ) -> Result<Regex, Error> {
+        let mut ire = parse::try_parse(pattern, flags, utf16_atoms)?;
         if !flags.no_opt {
             optimizer::optimize(&mut ire);
         }
-        let cr = emit::emit(&ire);
+        let cr = emit::emit_with(
+            &ire,
+            #[cfg(feature = "utf16")]
+            factors,
+        );
         Ok(Regex { cr })
     }
 
@@ -505,7 +571,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
     {
-        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let input = Utf16Input::new(text, self.cr.flags.unicode_mode());
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -523,7 +589,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Ucs2Input<'t>>>
     {
-        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let input = Ucs2Input::new(text, self.cr.flags.unicode_mode());
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -531,6 +597,26 @@ impl Regex {
             ),
             start,
         )
+    }
+
+    /// Attempt UTF-16 and UCS-2 matches with \p attempt in place of the bytecode interpreter.
+    /// \p attempt must be the matcher `codegen` generated from this regex's pattern and flags,
+    /// for the input `find_from_utf16` or `find_from_ucs2` is then called with.
+    #[cfg(feature = "utf16")]
+    #[doc(hidden)]
+    pub fn set_attempt(&mut self, attempt: crate::aot::Attempt) {
+        self.cr.attempt = Some(attempt);
+    }
+
+    /// Returns the number of capture groups, not counting the whole match.
+    pub fn group_count(&self) -> usize {
+        self.cr.groups as usize
+    }
+
+    /// Returns the names of the capture groups in order, empty for unnamed groups; or an empty
+    /// slice if no group is named.
+    pub fn group_names(&self) -> &[Box<str>] {
+        &self.cr.group_names
     }
 
     /// Replaces the first match of the regex in `text` with the replacement string.

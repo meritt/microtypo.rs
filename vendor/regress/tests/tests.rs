@@ -2520,3 +2520,36 @@ fn test_find_from_char_boundaries() {
     // An out-of-range ascii start likewise yields no matches, not a panic.
     assert!(re.find_from_ascii("abc", 4).next().is_none());
 }
+
+#[test]
+#[cfg(feature = "utf16")]
+fn explicit_pattern_encoding_keeps_utf8_and_utf16_atom_domains() {
+    let source: Vec<_> = "😀+".encode_utf16().collect();
+    let input: Vec<_> = "😀😀".encode_utf16().collect();
+    let legacy = regress::Regex::from_utf16(&source, "").unwrap();
+    let unicode = regress::Regex::from_utf16(&source, "u").unwrap();
+    assert_eq!(
+        legacy.find_from_ucs2(&input, 0).next().unwrap().range(),
+        0..2
+    );
+    assert_eq!(
+        unicode.find_from_utf16(&input, 0).next().unwrap().range(),
+        0..4
+    );
+    assert_eq!(
+        regress::Regex::with_flags("😀+", "")
+            .unwrap()
+            .find("😀😀")
+            .unwrap()
+            .range(),
+        0..8
+    );
+    assert_eq!(
+        regress::Regex::with_flags("😀+", "u")
+            .unwrap()
+            .find("😀😀")
+            .unwrap()
+            .range(),
+        0..8
+    );
+}

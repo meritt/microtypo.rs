@@ -62,18 +62,18 @@ fn test_excessive_nesting() {
 
 #[test]
 fn test_syntax_errors() {
-    test_1_error(r"*", "Invalid atom character");
-    test_1_error(r"x**", "Invalid atom character");
-    test_1_error(r"?", "Invalid atom character");
-    test_1_error(r"{3,5}", "Invalid atom character");
-    test_1_error(r"x{5,3}", "Invalid quantifier");
+    test_1_error(r"*", "Nothing to repeat");
+    test_1_error(r"x**", "Nothing to repeat");
+    test_1_error(r"?", "Nothing to repeat");
+    test_1_error(r"{3,5}", "Nothing to repeat");
+    test_1_error(r"x{5,3}", "numbers out of order in {} quantifier");
 
-    test_1_error(r"]", "Invalid atom character");
+    test_1_error(r"]", "Lone quantifier brackets");
     test_1_error(r"[abc", "Unbalanced bracket");
 
-    test_1_error(r"(", "Unbalanced parenthesis");
-    test_1_error(r"(?!", "Unbalanced parenthesis");
-    test_1_error(r"abc)", "Unbalanced parenthesis");
+    test_1_error(r"(", "Unterminated group");
+    test_1_error(r"(?!", "Unterminated group");
+    test_1_error(r"abc)", "Unmatched ')'");
 
     test_1_error(
         r"[z-a]",
@@ -81,14 +81,14 @@ fn test_syntax_errors() {
     );
 
     // In unicode mode this is not allowed.
-    test_1_error(r"[a-\s]", "Invalid character range");
+    test_1_error(r"[a-\s]", "Invalid character class");
 
     test_1_error("\\", "Incomplete escape");
 
-    test_1_error("^*", "Quantifier not allowed here");
-    test_1_error("${3}", "Quantifier not allowed here");
-    test_1_error("(?=abc)*", "Quantifier not allowed here");
-    test_1_error("(?!abc){3,}", "Quantifier not allowed here");
+    test_1_error("^*", "Nothing to repeat");
+    test_1_error("${3}", "Nothing to repeat");
+    test_1_error("(?=abc)*", "Invalid quantifier");
+    test_1_error("(?!abc){3,}", "Invalid quantifier");
 
     test_1_error(r"\2(a)", "Invalid character escape");
     test_1_error("(?q:abc)", "Invalid group modifier");
@@ -102,7 +102,7 @@ fn test_invalid_hex_escape() {
     let res = regress::Regex::with_flags(r"\1\x(", "");
     assert!(res.is_err());
     assert!(
-        res.err().unwrap().text.contains("Unbalanced parenthesis"),
+        res.err().unwrap().text.contains("Unterminated group"),
         "Expected the leftover '(' to be treated as an unterminated group"
     );
 

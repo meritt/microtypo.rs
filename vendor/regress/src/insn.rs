@@ -198,7 +198,7 @@ const DENSE_BRACKET_CPS: u32 = 0x800;
 pub struct CompiledBracket {
     /// Whether each code point below `DENSE_BRACKET_CPS` matches, inversion applied.
     dense: [u64; DENSE_BRACKET_CPS as usize / 64],
-    contents: BracketContents,
+    pub(crate) contents: BracketContents,
 }
 
 impl CompiledBracket {
@@ -245,6 +245,11 @@ pub struct CompiledRegex {
     // Where matches may be in UTF-16 or UCS-2 input.
     #[cfg(feature = "utf16")]
     pub utf16: crate::utf16prefilter::Utf16Prefilter,
+
+    // The matcher compiled ahead of time from these instructions that attempts UTF-16 and UCS-2
+    // matches in place of the interpreter, if any.
+    #[cfg(feature = "utf16")]
+    pub attempt: Option<crate::aot::Attempt>,
 
     // Number of loops, used to populate loop data.
     pub loops: u32,

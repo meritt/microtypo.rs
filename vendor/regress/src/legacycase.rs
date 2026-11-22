@@ -15,11 +15,36 @@ pub(crate) fn canonicalize(cu: u32) -> u32 {
     if cu > 0xFFFF {
         return cu;
     }
-    match LEGACY_CANON.binary_search_by_key(&(cu as u16), |&(from, _)| from) {
-        Ok(i) => u32::from(LEGACY_CANON[i].1),
-        Err(_) => cu,
+    u32::from(canonical_unit(cu as u16))
+}
+
+const fn canonical_unit(cu: u16) -> u16 {
+    let (mut lo, mut hi) = (0, LEGACY_CANON.len());
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if LEGACY_CANON[mid].0 < cu {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo < LEGACY_CANON.len() && LEGACY_CANON[lo].0 == cu {
+        LEGACY_CANON[lo].1
+    } else {
+        cu
     }
 }
+
+static TARGET_FIXED: [bool; LEGACY_CANON.len()] = {
+    let mut fixed = [true; LEGACY_CANON.len()];
+    let mut i = 0;
+    while i < LEGACY_CANON.len() {
+        let target = LEGACY_CANON[i].1;
+        fixed[i] = canonical_unit(target) == target;
+        i += 1;
+    }
+    fixed
+};
 
 // Every code unit whose canonical form is `target`.
 fn preimage(target: u32, out: &mut Vec<u32>) {
@@ -55,9 +80,8 @@ pub(crate) fn add_icase_code_points(input: CodePointSet) -> CodePointSet {
     mapped.dedup();
 
     let mut result = input.clone();
-    for &(from, to) in LEGACY_CANON {
+    for (&(from, to), &fixed) in LEGACY_CANON.iter().zip(&TARGET_FIXED) {
         let (from, to32) = (u32::from(from), u32::from(to));
-        let fixed = canonicalize(to32) == to32;
         // `from` is in the canonical image when its own form is reached by a member: through the
         // table, or by being that form itself.
         if mapped.binary_search(&to).is_ok() || (fixed && input.contains(to32)) {

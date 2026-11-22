@@ -195,9 +195,9 @@ fn uppercase(cu: u32) -> u32 {
     }
 }
 
-// Add all folded characters in the given interval to the given code point set.
+// Add all folded characters in the given interval to the given intervals.
 // This skips characters which fold to themselves.
-fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
+fn fold_interval(iv: Interval, recv: &mut Vec<Interval>) {
     let overlaps = FOLDS.equal_range_by(|tr| {
         if tr.first() > iv.last {
             Ordering::Greater
@@ -218,12 +218,12 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
 
         let modulo = fr.predicate_mask() + 1;
         if modulo == 1 {
-            // Optimization: when modulo is 1, every character in range gets transformed
-            for cu in first_trans..(last_trans + 1) {
-                let cs = fr.add_delta(cu);
-                if cs != cu {
-                    recv.add_one(cs);
-                }
+            // Every character in range moves by the same delta, so the range moves as a whole.
+            if fr.delta() != 0 {
+                recv.push(Interval::new(
+                    fr.add_delta(first_trans),
+                    fr.add_delta(last_trans),
+                ));
             }
         } else {
             // Optimization: walk by modulo amount instead of checking every character
@@ -233,20 +233,25 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             let mut cu = start_aligned;
             while cu <= last_trans {
                 let cs = fr.add_delta(cu);
-                recv.add_one(cs);
+                recv.push(Interval::new(cs, cs));
                 cu += modulo;
             }
         }
     }
 }
 
-/// Find all characters that fold into the given interval and add them to the given code point set.
+/// Find all characters that fold into the given set and add them to the given intervals.
 /// This skips characters which fold to themselves.
-fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
+fn unfold_set(set: &CodePointSet, recv: &mut Vec<Interval>) {
+    let ivs = set.intervals();
     // Note: We still need to check all ranges because the relationship between
     // transformed_from and transformed_to intervals can be complex
     for tr in FOLDS.iter() {
-        if !iv.overlaps(tr.transformed_to()) {
+        let to = tr.transformed_to();
+        // The intervals of the set the range lands in.
+        let landing = &ivs[ivs.partition_point(|iv| iv.last < to.first)..];
+        let landing = &landing[..landing.partition_point(|iv| iv.first <= to.last)];
+        if landing.is_empty() {
             continue;
         }
 
@@ -254,23 +259,28 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
         let first_source = tr.first();
         let last_source = tr.last();
 
-        let mut process_cp = |cp| {
-            let tcp = tr.apply(cp);
-            if tcp != cp && iv.contains(tcp) {
-                recv.add_one(cp);
-            }
-        };
-
         if modulo == 1 {
-            // Optimization: when modulo is 1, every character in range gets transformed
-            for cp in first_source..(last_source + 1) {
-                process_cp(cp);
+            // Every character in range moves by the same delta, so those landing in an
+            // interval are the interval moved back, within the range.
+            let delta = i64::from(tr.delta());
+            if delta == 0 {
+                continue;
+            }
+            for iv in landing {
+                let first = i64::from(first_source).max(i64::from(iv.first) - delta);
+                let last = i64::from(last_source).min(i64::from(iv.last) - delta);
+                if first <= last {
+                    recv.push(Interval::new(first as u32, last as u32));
+                }
             }
         } else {
             // Walk by modulo amount instead of checking every character
             let mut cp = first_source;
             while cp <= last_source {
-                process_cp(cp);
+                let tcp = tr.apply(cp);
+                if tcp != cp && set.contains(tcp) {
+                    recv.push(Interval::new(cp, cp));
+                }
                 cp += modulo;
             }
         }
@@ -343,18 +353,15 @@ pub(crate) fn expand_code_point(c: u32, icase: bool, unicode: bool) -> Vec<u32> 
 }
 
 // Fold every character in \p input, then find all the prefolds.
-pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
-    let mut folded = input.clone();
+pub fn add_icase_code_points(input: CodePointSet) -> CodePointSet {
+    let mut folded = input.intervals().to_vec();
     for iv in input.intervals() {
         fold_interval(*iv, &mut folded)
     }
-
-    // Reuse input storage.
-    input.clone_from(&folded);
-    for iv in folded.intervals() {
-        unfold_interval(*iv, &mut input);
-    }
-    input
+    let folded = CodePointSet::from_intervals(folded);
+    let mut unfolded = folded.intervals().to_vec();
+    unfold_set(&folded, &mut unfolded);
+    CodePointSet::from_intervals(unfolded)
 }
 
 pub(crate) enum PropertyEscapeKind {
@@ -593,9 +600,12 @@ mod tests {
                         expected.add_one(fc);
                     }
                 }
-                let mut cps = CodePointSet::default();
-                fold_interval(Interval { first, last }, &mut cps);
-                assert_eq!(cps.intervals(), expected.intervals());
+                let mut ivs = Vec::new();
+                fold_interval(Interval { first, last }, &mut ivs);
+                assert_eq!(
+                    CodePointSet::from_intervals(ivs).intervals(),
+                    expected.intervals()
+                );
 
                 from = last;
             }
