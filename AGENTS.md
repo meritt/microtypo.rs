@@ -44,10 +44,11 @@ cargo test -p microtypo-core --release --test conformance
 node packages/npm/test/corpus.mjs packages/npm/dist/microtypo.js
 MICROTYPO_CORPUS_ONLY=<id> cargo test -p microtypo-core --release --test conformance
 cargo xtask parity [../microtypo] [--ref <rev>]
+cargo xtask cli [../microtypo] [--ref <rev>]
 cargo xtask corpus ../microtypo
 ```
 
-`MICROTYPO_CORPUS` overrides the corpus file (absolute path). Mismatches go to `target/conformance-failures.jsonl`. `parity` compares the rule registry and the expressions the reference runs at the commit in `corpus.sha256` (or `--ref`) with the core and exits 1 on a difference not listed in `xtask/parity/exceptions.mjs`. The last command runs `parity` against the commit of the new corpus, copies the corpus and repins `corpus.sha256`; the corpus is never edited here.
+`MICROTYPO_CORPUS` overrides the corpus file (absolute path). Mismatches go to `target/conformance-failures.jsonl`. `parity` compares the rule registry and the expressions the reference runs at the commit in `corpus.sha256` (or `--ref`) with the core and exits 1 on a difference not listed in `xtask/parity/exceptions.mjs`. `cli` runs both command-line tools on `xtask/cli/cases.json` and exits 1 on a difference in stdout, stderr, exit code or the file tree, except for cases marked `listed`. The last command runs `parity` against the commit of the new corpus, copies the corpus and repins `corpus.sha256`; the corpus is never edited here.
 
 ## Fuzzing and speed
 

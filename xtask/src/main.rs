@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | dist [<dir>] \
                      | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check] \
-                     | parity [<src>] [--ref REV] \
+                     | parity [<src>] [--ref REV] | cli [<src>] [--ref REV] \
                      | fuzz <src> [--cases N] [--seed S] [--jobs N] [--ref REV] [--keep-going | --coverage] [--reuse] \
                      | bench [<src>] [--json] [--ref REV] | bench --compare <a.json> <b.json> [--threshold PCT]";
 
@@ -68,6 +68,7 @@ fn main() -> ExitCode {
         ["matchers"] => matchers(false),
         ["matchers", "--check"] => matchers(true),
         ["parity", rest @ ..] => parity(rest),
+        ["cli", rest @ ..] => cli(rest),
         ["fuzz", rest @ ..] => fuzz(rest),
         ["bench", rest @ ..] => bench(rest),
         _ => Err(USAGE.to_owned()),
@@ -454,6 +455,184 @@ fn check_parity(repo: &Path, rev: Option<&str>) -> Result {
     } else {
         Err(format!("the rules or expressions of the core differ from the reference at {}", reference.commit))
     }
+}
+
+struct Run {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: Option<i32>,
+    tree: Vec<String>,
+}
+
+fn cli(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref"], &[])?;
+    let repo = repo(&positional)?;
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-cli"]))?;
+    let reference = reference(&repo, named.get("--ref").copied())?;
+    let spec_path = root().join("xtask/cli/cases.json");
+    let spec: Value = serde_json::from_str(&fs::read_to_string(&spec_path).map_err(at(spec_path.display()))?)
+        .map_err(at(spec_path.display()))?;
+    let work = target_dir().join("cli").join(std::process::id().to_string());
+    fresh_dir(&work)?;
+    write(&work.join("outside.txt"), spec["outside"].as_str().unwrap_or_default())?;
+    let tree = work.join("tree");
+    let rust = target_dir().join("release/microtypo");
+    let node_cli = reference.dir.join("src/cli/index.js");
+    let empty = Vec::new();
+    let cases = spec["cases"].as_array().unwrap_or(&empty);
+    let (mut identical, mut listed, mut differences) = (0, 0, 0);
+    for case in cases {
+        let args: Vec<&str> = case["args"].as_array().unwrap_or(&empty).iter().filter_map(Value::as_str).collect();
+        let times = case["repeat"].as_u64().unwrap_or(1) as usize;
+        let stdin = match (case["stdin"].as_str(), case["stdinHex"].as_str()) {
+            (Some(text), _) => text.repeat(times).into_bytes(),
+            (None, Some(hex)) => bytes_of(hex)?,
+            (None, None) => Vec::new(),
+        };
+        let mut sides = Vec::new();
+        for program in [&rust, &node_cli] {
+            fixture(&tree, &spec["fixture"], &case["files"])?;
+            let mut command = if program == &node_cli {
+                let mut command = Command::new("node");
+                command.arg(program);
+                command
+            } else {
+                Command::new(program)
+            };
+            command.args(&args).current_dir(&tree);
+            for name in ["FORCE_COLOR", "NO_COLOR", "NODE_DISABLE_COLORS"] {
+                command.env_remove(name);
+            }
+            if let Some(env) = case["env"].as_object() {
+                for (name, value) in env {
+                    if let Some(value) = value.as_str() {
+                        command.env(name, value);
+                    }
+                }
+            }
+            sides.push(invoke(&mut command, &stdin, &tree)?);
+        }
+        let shown = serde_json::to_string(&args).unwrap_or_default();
+        let (port, js) = (&sides[0], &sides[1]);
+        let same = port.stdout == js.stdout && port.stderr == js.stderr && port.code == js.code && port.tree == js.tree;
+        match (same, case["listed"].as_str()) {
+            (true, None) => identical += 1,
+            (true, Some(_)) => {
+                differences += 1;
+                println!("{shown}: listed as different but identical");
+            }
+            (false, Some(_)) => listed += 1,
+            (false, None) => {
+                differences += 1;
+                println!("{shown}:");
+                let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+                for (what, a, b) in [
+                    ("stdout", text(&port.stdout), text(&js.stdout)),
+                    ("stderr", text(&port.stderr), text(&js.stderr)),
+                    ("exit", format!("{:?}", port.code), format!("{:?}", js.code)),
+                    ("files", port.tree.join("\n"), js.tree.join("\n")),
+                ] {
+                    if a != b {
+                        println!("  {what}\n    port: {a:?}\n    reference: {b:?}");
+                    }
+                }
+            }
+        }
+    }
+    unlock(&tree);
+    drop(fs::remove_dir_all(&work));
+    println!(
+        "FORCE_COLOR with NO_COLOR or NODE_DISABLE_COLORS is excluded: Node emits a warning containing its process ID"
+    );
+    println!(
+        "cli comparison with the reference at {}: {} invocations, {identical} identical, {listed} listed in xtask/cli/cases.json; {differences} differences",
+        reference.commit,
+        cases.len()
+    );
+    if differences == 0 { Ok(()) } else { Err("the CLI differs from the reference".to_owned()) }
+}
+
+fn bytes_of(hex: &str) -> Result<Vec<u8>> {
+    let digits: Vec<u8> = hex.bytes().filter(u8::is_ascii_hexdigit).collect();
+    digits
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap_or_default(), 16).map_err(at(hex)))
+        .collect()
+}
+
+fn unlock(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    drop(fs::set_permissions(dir, fs::Permissions::from_mode(0o755)));
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            drop(fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o755)));
+            unlock(&entry.path());
+        }
+    }
+}
+
+fn fixture(tree: &Path, base: &Value, extra: &Value) -> Result {
+    unlock(tree);
+    fresh_dir(tree)?;
+    let mut modes = Vec::new();
+    let none = serde_json::Map::new();
+    for (path, file) in base.as_object().unwrap_or(&none).iter().chain(extra.as_object().unwrap_or(&none)) {
+        let at_path = tree.join(path);
+        if let Some(target) = file["link"].as_str() {
+            std::os::unix::fs::symlink(target, &at_path).map_err(at(at_path.display()))?;
+        } else if file["dir"].as_bool() == Some(true) {
+            fs::create_dir_all(&at_path).map_err(at(at_path.display()))?;
+        } else if let Some(hex) = file["hex"].as_str() {
+            write(&at_path, &bytes_of(hex)?)?;
+        } else {
+            write(&at_path, file["text"].as_str().unwrap_or_default())?;
+        }
+        if let Some(mode) = file["mode"].as_u64() {
+            modes.push((at_path, mode as u32));
+        }
+    }
+    for (path, mode) in modes.into_iter().rev() {
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).map_err(at(path.display()))?;
+    }
+    Ok(())
+}
+
+fn snapshot(dir: &Path, prefix: &str, entries: &mut Vec<String>) {
+    let Ok(listing) = fs::read_dir(dir) else { return };
+    let mut paths: Vec<PathBuf> = listing.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    for path in paths {
+        let name = format!("{prefix}{}", path.file_name().unwrap_or_default().to_string_lossy());
+        let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+        let mode = meta.permissions().mode() & 0o777;
+        if meta.file_type().is_symlink() {
+            let target = fs::read_link(&path).unwrap_or_default();
+            entries.push(format!("{name} -> {}", target.display()));
+        } else if meta.is_dir() {
+            entries.push(format!("{name}/ {mode:o}"));
+            snapshot(&path, &format!("{name}/"), entries);
+        } else {
+            let content = fs::read(&path).map_or_default(|b| String::from_utf8_lossy(&b).into_owned());
+            entries.push(format!("{name} {mode:o} {content:?}"));
+        }
+    }
+}
+
+fn invoke(command: &mut Command, stdin: &[u8], tree: &Path) -> Result<Run> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(at(show(command)))?;
+    let mut input = child.stdin.take().expect("stdin is piped");
+    let stdin = stdin.to_vec();
+    let feeder = std::thread::spawn(move || drop(input.write_all(&stdin)));
+    let output = child.wait_with_output().map_err(at(show(command)))?;
+    drop(feeder.join());
+    let mut tree_entries = Vec::new();
+    snapshot(tree, "", &mut tree_entries);
+    Ok(Run { stdout: output.stdout, stderr: output.stderr, code: output.status.code(), tree: tree_entries })
 }
 
 fn fuzz(args: &[&str]) -> Result {

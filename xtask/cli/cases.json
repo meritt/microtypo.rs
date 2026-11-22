@@ -1,0 +1,6451 @@
+{
+  "outside": "Снаружи - файл\n",
+  "fixture": {
+    "doc.txt": {
+      "text": "\"Амбер\" -- вечен, а 100 руб. -- это деньги.\n"
+    },
+    "a.txt": {
+      "text": "Он сказал: \"Да - да\".\n"
+    },
+    "b.txt": {
+      "text": "Тест - тест, 5 кг.\n"
+    },
+    "crlf.txt": {
+      "text": "\"Один\" - два\r\n"
+    },
+    "crlf2.txt": {
+      "text": "Строка - раз\r\nСтрока - два\r\n"
+    },
+    "nonl.txt": {
+      "text": "Без перевода - строки"
+    },
+    "post.md": {
+      "text": "# Заголовок\n\n\"Текст\" -- и `код \"тут\"`.\n"
+    },
+    "conf.json": {
+      "text": "{ \"html\": true, \"rules\": { \"quote\": false } }\n"
+    },
+    "conf-rules.json": {
+      "text": "{ \"rules\": { \"nbsp\": true } }\n"
+    },
+    "bad.json": {
+      "text": "{ html: true }\n"
+    },
+    "arr.json": {
+      "text": "[1]\n"
+    },
+    "str.json": {
+      "text": "\"x\"\n"
+    },
+    "null.json": {
+      "text": "null\n"
+    },
+    "unknown.json": {
+      "text": "{ \"colour\": 1 }\n"
+    },
+    "huge.json": {
+      "text": "{ \"maxInputLength\": 1e400, \"maxProcessingMs\": -1e400 }\n"
+    },
+    "dup.json": {
+      "text": "{ \"html\": false, \"html\": true, \"2\": {}, \"zeta\": 1, \"1\": true }\n"
+    },
+    "proto.json": {
+      "text": "{ \"__proto__\": { \"html\": true } }\n"
+    },
+    "surrogate.json": {
+      "text": "{ \"render\": { \"prefix\": \"\\ud800x\" } }\n"
+    },
+    "bin.txt": {
+      "hex": "fffe41e2820a22d0942220ed a080 0a"
+    },
+    "bom.txt": {
+      "text": "﻿\"Да\" - нет\n"
+    },
+    "dir": {
+      "dir": true
+    },
+    "dir/inner.txt": {
+      "text": "Внутри - текст\n"
+    },
+    "link.txt": {
+      "link": "doc.txt"
+    },
+    "out-link.txt": {
+      "link": "../outside.txt"
+    },
+    "dangling.txt": {
+      "link": "missing.txt"
+    },
+    "ro.txt": {
+      "text": "Только - чтение\n",
+      "mode": 292
+    },
+    "noread.txt": {
+      "text": "Нечитаемый - файл\n",
+      "mode": 0
+    },
+    "locked": {
+      "dir": true,
+      "mode": 365
+    },
+    "locked/file.txt": {
+      "text": "Запертый - каталог\n"
+    }
+  },
+  "cases": [
+    {
+      "args": [
+        "--bad\u001b[39moption"
+      ],
+      "env": {
+        "FORCE_COLOR": "1"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": ""
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "1"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "true"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "2"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "3"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "0"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "FORCE_COLOR": "false"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "NO_COLOR": "1"
+      }
+    },
+    {
+      "args": [
+        "--unknown-option"
+      ],
+      "env": {
+        "NODE_DISABLE_COLORS": "1"
+      }
+    },
+    {
+      "args": [],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--html"
+      ],
+      "stdin": "\"Амбер\" -- вечен, 100 руб.\n\nВторой абзац - тут.\n"
+    },
+    {
+      "args": [
+        "--no-html",
+        "--entities"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--entities",
+        "--no-entities"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--input",
+        "markdown"
+      ],
+      "stdin": "# Заголовок\n\n\"Текст\" -- и `код \"тут\"`.\n"
+    },
+    {
+      "args": [
+        "--input=html"
+      ],
+      "stdin": "<p>\"Цитата\" - и <code>\"x\"</code></p>\n"
+    },
+    {
+      "args": [
+        "--input",
+        "yaml"
+      ],
+      "stdin": "title: \"Да\" - нет\n"
+    },
+    {
+      "args": [
+        "--hanging",
+        "--html"
+      ],
+      "stdin": "Он сказал: \"Да\" (и ушёл).\n"
+    },
+    {
+      "args": [
+        "--no-hanging",
+        "--html"
+      ],
+      "stdin": "Он сказал: \"Да\" (и ушёл).\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "nbsp=false",
+        "--rule",
+        "quote=off"
+      ],
+      "stdin": "\"Амбер\" -- вечен, 100 руб.\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "dash=0"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--render",
+        "nowrap=span",
+        "--html"
+      ],
+      "stdin": "Звоните +7 (900) 123-45-67 до 12.03.2024.\n"
+    },
+    {
+      "args": [
+        "--render",
+        "prefix=t-",
+        "--hanging",
+        "--html"
+      ],
+      "stdin": "\"Да\" (нет).\n"
+    },
+    {
+      "args": [
+        "--set",
+        "render.hanging=class",
+        "--set",
+        "html=true"
+      ],
+      "stdin": "\"Да\" (нет).\n"
+    },
+    {
+      "args": [
+        "--set",
+        "rules.quote=false"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--set",
+        "input.format=markdown"
+      ],
+      "stdin": "*\"Да\"* -- `\"нет\"`\n"
+    },
+    {
+      "args": [
+        "--set",
+        "maxInputLength=10"
+      ],
+      "stdin": "абвгд ежзий\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "5"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "10"
+      ],
+      "stdin": "абвгдеж зий"
+    },
+    {
+      "args": [
+        "--max-input",
+        "abc"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "Infinity"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "0x40"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        ""
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        " 1e2 "
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--max-input=-1"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "1.5"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-input",
+        "9999999"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-ms=-1"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-ms",
+        "abc"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--max-ms",
+        "1e9"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--max-ms",
+        "1",
+        "--max-input",
+        "100000"
+      ],
+      "stdin": "\"Дом\" - дом, 5 кг, 100 руб. ",
+      "repeat": 1500
+    },
+    {
+      "args": [
+        "--max-input",
+        "1000"
+      ],
+      "stdin": "\"Дом\" - дом. ",
+      "repeat": 100
+    },
+    {
+      "args": []
+    },
+    {
+      "args": [],
+      "stdinHex": "fffe41e2820a22d0942220eda0800a"
+    },
+    {
+      "args": [],
+      "stdin": "﻿\"Да\" - нет\n"
+    },
+    {
+      "args": [],
+      "stdin": "\"Да\" - нет\r\n"
+    },
+    {
+      "args": [],
+      "stdin": "Строка - раз\r\nСтрока - два\r\n"
+    },
+    {
+      "args": [],
+      "stdin": "Без перевода - строки"
+    },
+    {
+      "args": [
+        "--nope"
+      ]
+    },
+    {
+      "args": [
+        "-x"
+      ]
+    },
+    {
+      "args": [
+        "--input"
+      ]
+    },
+    {
+      "args": [
+        "-o"
+      ]
+    },
+    {
+      "args": [
+        "--html=yes"
+      ]
+    },
+    {
+      "args": [
+        "--no-write=1"
+      ]
+    },
+    {
+      "args": [
+        "--no-input"
+      ]
+    },
+    {
+      "args": [
+        "--input",
+        "--html"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "-x"
+      ]
+    },
+    {
+      "args": [
+        "-xyz"
+      ]
+    },
+    {
+      "args": [
+        "--na\"me\u0001"
+      ]
+    },
+    {
+      "args": [
+        "--=a=b"
+      ]
+    },
+    {
+      "args": [
+        "--rule",
+        "nbsp"
+      ]
+    },
+    {
+      "args": [
+        "--render",
+        "=x"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--set",
+        "__proto__.x=1"
+      ]
+    },
+    {
+      "args": [
+        "--set",
+        "a.constructor=1"
+      ]
+    },
+    {
+      "args": [
+        "--set",
+        "colour=red"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--set",
+        "rules.1=true",
+        "--set",
+        "rules.zeta=true",
+        "--set",
+        "rules.0=true"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "nope=true"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "__proto__=true"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "constructor=1"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "nbsp=1",
+        "--set",
+        "rules.nbsp=false"
+      ],
+      "stdin": "100 руб.\n"
+    },
+    {
+      "args": [
+        "--rule",
+        "nbsp=Infinity"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--render",
+        "prefix=Infinity",
+        "--html"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--render",
+        "prefix=NaN",
+        "--html",
+        "--hanging"
+      ],
+      "stdin": "\"Да\"\n"
+    },
+    {
+      "args": [
+        "--input",
+        "csv"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "-h"
+      ]
+    },
+    {
+      "args": [
+        "--help"
+      ]
+    },
+    {
+      "args": [
+        "--no-help"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "-wh"
+      ]
+    },
+    {
+      "args": [
+        "--version"
+      ],
+      "listed": "prints the version of the port, not of the reference"
+    },
+    {
+      "args": [
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "a.txt",
+        "b.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "a.txt",
+        "b.txt"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "out.txt",
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "-ofile.txt",
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "-o",
+        "out.txt",
+        "a.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "-o",
+        "out.txt"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "missing.txt"
+      ]
+    },
+    {
+      "args": [
+        "dir"
+      ]
+    },
+    {
+      "args": [
+        "--max-input",
+        "3",
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "crlf.txt"
+      ]
+    },
+    {
+      "args": [
+        "crlf2.txt"
+      ]
+    },
+    {
+      "args": [
+        "nonl.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "crlf2.txt",
+        "nonl.txt"
+      ]
+    },
+    {
+      "args": [
+        "--input",
+        "markdown",
+        "post.md"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "link.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "out-link.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "dangling.txt"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "nodir/out.txt",
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "ro.txt"
+      ]
+    },
+    {
+      "args": [
+        "noread.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "locked/file.txt"
+      ]
+    },
+    {
+      "args": [
+        "--",
+        "-weird.txt"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "out-link.txt",
+        "doc.txt"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "link.txt",
+        "a.txt"
+      ]
+    },
+    {
+      "args": [
+        "-o",
+        "ro.txt",
+        "a.txt"
+      ]
+    },
+    {
+      "args": [
+        "bin.txt"
+      ]
+    },
+    {
+      "args": [
+        "bom.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "doc.txt",
+        "missing.txt"
+      ]
+    },
+    {
+      "args": [
+        "-w",
+        "doc.txt",
+        "dir/../a.txt",
+        "./b.txt"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "conf.json"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--config",
+        "conf.json",
+        "--no-html"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--config",
+        "conf-rules.json",
+        "--rule",
+        "quote=false"
+      ],
+      "stdin": "\"Амбер\" 100 руб.\n"
+    },
+    {
+      "args": [
+        "--config",
+        "conf-rules.json",
+        "--rule",
+        "constructor=1"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--config",
+        "bad.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "arr.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "str.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "null.json"
+      ],
+      "stdin": "\"Амбер\" -- вечен\n"
+    },
+    {
+      "args": [
+        "--config",
+        "unknown.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "huge.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "dup.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "proto.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "surrogate.json"
+      ],
+      "stdin": "текст\n"
+    },
+    {
+      "args": [
+        "--config",
+        "missing.json"
+      ]
+    },
+    {
+      "args": [
+        "--config",
+        "dir"
+      ]
+    },
+    {
+      "args": [],
+      "stdin": "\"Амбер\" -- вечен\n",
+      "files": {
+        ".microtyporc.json": {
+          "text": "{ \"html\": true }"
+        }
+      }
+    },
+    {
+      "args": [],
+      "stdin": "текст\n",
+      "files": {
+        ".microtyporc.json": {
+          "text": "{ broken"
+        }
+      }
+    },
+    {
+      "args": [
+        "--config",
+        ""
+      ],
+      "stdin": "\"Амбер\" -- вечен\n",
+      "files": {
+        ".microtyporc.json": {
+          "text": "{ \"entities\": true }"
+        }
+      }
+    },
+    {
+      "name": "explain-stdin",
+      "args": [
+        "--explain"
+      ],
+      "stdin": "\"Амбер\"",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "explain-data-rules",
+      "args": [
+        "--config",
+        "rules.json",
+        "--explain"
+      ],
+      "stdin": "aa aa",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "explain-write",
+      "args": [
+        "--explain",
+        "--write",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "check-stdin-modified",
+      "args": [
+        "--check"
+      ],
+      "stdin": "\"Амбер\"\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "check-stdin-clean",
+      "args": [
+        "--check"
+      ],
+      "stdin": "Амбер\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "check-input-utf16-columns",
+      "args": [
+        "--check",
+        "--input",
+        "markdown"
+      ],
+      "stdin": "😀 \"Амбер\"\r\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "check-multiple-sorted",
+      "args": [
+        "--check",
+        "b.md",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "check-explain",
+      "args": [
+        "--check",
+        "--explain",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "diff-no-final-newline",
+      "args": [
+        "--diff"
+      ],
+      "stdin": "\"Амбер\"",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "diff-clean",
+      "args": [
+        "--diff"
+      ],
+      "stdin": "Амбер\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "diff-file-spaces",
+      "args": [
+        "--diff",
+        "Черновик текста.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "diff-file-controls",
+      "args": [
+        "--diff",
+        "tab\tnewline\n.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "diff-multiple",
+      "args": [
+        "--diff",
+        "b.md",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "inferred-markdown",
+      "args": [
+        "post.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "inferred-json",
+      "args": [
+        "data.json"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "explicit-format-wins",
+      "args": [
+        "--input",
+        "text",
+        "post.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "stdin-filepath-inference",
+      "args": [
+        "--stdin-filepath",
+        "virtual.md"
+      ],
+      "stdin": "`\"код\"` и \"Амбер\"\r\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "override-by-mask",
+      "args": [
+        "--config",
+        "overrides.json",
+        "--stdin-filepath",
+        "nested/virtual.md"
+      ],
+      "stdin": "\"Амбер\"\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "override-exclude",
+      "args": [
+        "--config",
+        "overrides.json",
+        "--stdin-filepath",
+        "nested/keep.md"
+      ],
+      "stdin": "\"Амбер\"\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "flags-win-override",
+      "args": [
+        "--config",
+        "overrides.json",
+        "--stdin-filepath",
+        "virtual.md",
+        "--rule",
+        "quote.*=true"
+      ],
+      "stdin": "\"Амбер\"\n",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "directory-traversal",
+      "args": [
+        "--check",
+        "nested"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "glob-deduplication",
+      "args": [
+        "--check",
+        "nested/*.md",
+        "nested/c.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "ignore-negation",
+      "args": [
+        "--check",
+        "nested"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        },
+        ".microtypoignore": {
+          "text": "nested/\n!nested/keep.md\n"
+        }
+      }
+    },
+    {
+      "name": "ignore-stdin-path",
+      "args": [
+        "--stdin-filepath",
+        "nested/virtual.md"
+      ],
+      "stdin": "\"Амбер\"",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        },
+        ".microtypoignore": {
+          "text": "nested/\n"
+        }
+      }
+    },
+    {
+      "name": "write-glob",
+      "args": [
+        "--write",
+        "nested/*.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "empty-glob",
+      "args": [
+        "--check",
+        "missing-*.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "invalid-data-rule",
+      "args": [
+        "--config",
+        "bad-rules.json"
+      ],
+      "stdin": "a",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "usage-check-write",
+      "args": [
+        "--check",
+        "--write",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "usage-diff-output",
+      "args": [
+        "--diff",
+        "--output-file",
+        "out.md"
+      ],
+      "stdin": "Амбер",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "usage-stdin-filepath-files",
+      "args": [
+        "--stdin-filepath",
+        "virtual.md",
+        "a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "cli-larger-than-library",
+      "args": [],
+      "stdin": "x",
+      "repeat": 30001,
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "explicit-cap",
+      "args": [
+        "--max-input",
+        "2"
+      ],
+      "stdin": "xxx",
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Тень\"\r\n"
+        },
+        "post.md": {
+          "text": "`\"код\"` и \"Амбер\"\r\n"
+        },
+        "data.json": {
+          "text": "{\"a - b\":\"Корвин - Эрик\"}\r\n"
+        },
+        "nested/c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/keep.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "Черновик текста.md": {
+          "text": "\"Амбер\"\r\n\"Тень\""
+        },
+        "tab\tnewline\n.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "rules.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"first\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"},{\"id\":\"second\",\"pattern\":{\"source\":\"b\",\"flags\":\"g\"},\"replacement\":\"c\"}]}]}"
+        },
+        "bad-rules.json": {
+          "text": "{\"ruleGroups\":[{\"name\":\"terms\",\"rules\":[{\"id\":\"broken\",\"pattern\":{\"source\":\"(\",\"flags\":\"g\"},\"replacement\":\"x\"}]}]}"
+        },
+        "overrides.json": {
+          "text": "{\"overrides\":[{\"files\":\"**/*.md\",\"exclude\":\"**/keep.md\",\"options\":{\"rules\":{\"quote.*\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "glob-brace",
+      "args": [
+        "--check",
+        "mask/{a,b}.md"
+      ],
+      "files": {
+        "mask/a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        }
+      }
+    },
+    {
+      "name": "glob-extglob",
+      "args": [
+        "--check",
+        "mask/@(a|b).md"
+      ],
+      "files": {
+        "mask/a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        }
+      }
+    },
+    {
+      "name": "glob-class",
+      "args": [
+        "--check",
+        "mask/[ab].md"
+      ],
+      "files": {
+        "mask/a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        }
+      }
+    },
+    {
+      "name": "glob-escaped",
+      "args": [
+        "--check",
+        "mask/\\[a\\].md"
+      ],
+      "files": {
+        "mask/[a].md": {
+          "text": "\"Амбер\""
+        }
+      }
+    },
+    {
+      "name": "glob-dot",
+      "args": [
+        "--check",
+        "mask/.*.md"
+      ],
+      "files": {
+        "mask/.a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        }
+      }
+    },
+    {
+      "name": "glob-negative-extglob",
+      "args": [
+        "--check",
+        "mask/!(b).md"
+      ],
+      "files": {
+        "mask/a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        }
+      }
+    },
+    {
+      "name": "override-native-masks",
+      "args": [
+        "--check",
+        "--config",
+        "masks.json",
+        "mask"
+      ],
+      "files": {
+        "mask/a.md": {
+          "text": "\"Амбер\""
+        },
+        "mask/b.md": {
+          "text": "\"Тень\""
+        },
+        "mask/.c.md": {
+          "text": "\"Дом\""
+        },
+        "masks.json": {
+          "text": "{\"overrides\": [{\"files\": \"mask/{a,b}.md\", \"exclude\": \"mask/@(b).md\", \"options\": {\"rules\": {\"quote.*\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "node26-{01..03}.md",
+      "args": [
+        "--check",
+        "{01..03}.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-{03..01}.md",
+      "args": [
+        "--check",
+        "{03..01}.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-{01..03..2}.md",
+      "args": [
+        "--check",
+        "{01..03..2}.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-!(a).md",
+      "args": [
+        "--check",
+        "!(a).md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-@(a|.hidden).md",
+      "args": [
+        "--check",
+        "@(a|.hidden).md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-**/*.md",
+      "args": [
+        "--check",
+        "**/*.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-{a,b}.md",
+      "args": [
+        "--check",
+        "{a,b}.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-[ab].md",
+      "args": [
+        "--check",
+        "[ab].md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-nested\\*.md",
+      "args": [
+        "--check",
+        "nested\\*.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-*.MD",
+      "args": [
+        "--check",
+        "*.MD"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-@(A|B).md",
+      "args": [
+        "--check",
+        "@(A|B).md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-{A,B}.md",
+      "args": [
+        "--check",
+        "{A,B}.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-[[]a].md",
+      "args": [
+        "--check",
+        "[[]a].md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "node26-.*/*.md",
+      "args": [
+        "--check",
+        ".*/*.md"
+      ],
+      "files": {
+        "01.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "02.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "03.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "2.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "3.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "[a].md": {
+          "text": "\"Дом\"\n"
+        },
+        ".hidden/x.md": {
+          "text": "\"Тень\"\n"
+        }
+      }
+    },
+    {
+      "name": "utf16-project-config",
+      "args": [
+        "--config",
+        "utf16.json",
+        "--explain"
+      ],
+      "stdin": "a",
+      "files": {
+        "utf16.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"custom\\ud800\",\"rules\":[{\"id\":\"r\\ud800\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"}]}],\"rules\":{\"custom\\ud800.r\\ud800\":true},\"overrides\":[{\"files\":\"*.md\",\"options\":{\"rules\":{\"custom\\ud800.r\\ud800\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "utf16-project-config",
+      "args": [
+        "--config",
+        "utf16.json",
+        "--stdin-filepath",
+        "x.md",
+        "--explain"
+      ],
+      "stdin": "a",
+      "files": {
+        "utf16.json": {
+          "text": "{\"presets\":false,\"ruleGroups\":[{\"name\":\"custom\\ud800\",\"rules\":[{\"id\":\"r\\ud800\",\"pattern\":{\"source\":\"a\",\"flags\":\"g\"},\"replacement\":\"b\"}]}],\"rules\":{\"custom\\ud800.r\\ud800\":true},\"overrides\":[{\"files\":\"*.md\",\"options\":{\"rules\":{\"custom\\ud800.r\\ud800\":false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[[:digit:]].md",
+      "args": [
+        "--check",
+        "file[[:digit:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[[:alpha:]].md",
+      "args": [
+        "--check",
+        "file[[:alpha:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[[:alnum:]].md",
+      "args": [
+        "--check",
+        "file[[:alnum:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[![:digit:]].md",
+      "args": [
+        "--check",
+        "file[![:digit:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[[:upper:]].md",
+      "args": [
+        "--check",
+        "file[[:upper:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-file[[:graph:]].md",
+      "args": [
+        "--check",
+        "file[[:graph:]].md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-@(a|!(b)).md",
+      "args": [
+        "--check",
+        "@(a|!(b)).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-@(a|b).md",
+      "args": [
+        "--check",
+        "@(a|b).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-a!(b)c.md",
+      "args": [
+        "--check",
+        "a!(b)c.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-**/!(a).md",
+      "args": [
+        "--check",
+        "**/!(a).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-@(.hidden|!(b)).md",
+      "args": [
+        "--check",
+        "@(.hidden|!(b)).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-{.git/a.md,a.md}",
+      "args": [
+        "--check",
+        "{.git/a.md,a.md}"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-{node_modules/a.md,a.md}",
+      "args": [
+        "--check",
+        "{node_modules/a.md,a.md}"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-.git/{a,b}.md",
+      "args": [
+        "--check",
+        ".git/{a,b}.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-node_modules/{a,b}.md",
+      "args": [
+        "--check",
+        "node_modules/{a,b}.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-glob-.git/a.md",
+      "args": [
+        "--check",
+        ".git/a.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "correction-override-file[[:digit:]].md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"file[[:digit:]].md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-file[[:alpha:]].md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"file[[:alpha:]].md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-@(a|!(b)).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"@(a|!(b)).md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-@(a|b).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"@(a|b).md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-a!(b)c.md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"a!(b)c.md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-**/!(a).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"**/!(a).md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-override-@(.hidden|!(b)).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "c.md",
+        "file1.md",
+        "file٩.md",
+        "filea.md",
+        "fileЖ.md",
+        ".hidden.md",
+        "ac.md",
+        "abc.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file1.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file٩.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "filea.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "fileЖ.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "file𐐀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "nested/.hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".git/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "node_modules/b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "ac.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "abc.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"@(.hidden|!(b)).md\", \"options\": {\"rules\": {\"quote\": false}}}]}"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''",
+      "args": [
+        "--config",
+        "units.json",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''--check",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''--diff",
+      "args": [
+        "--config",
+        "units.json",
+        "--diff",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''--explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''--check---explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-''--write",
+      "args": [
+        "--config",
+        "units.json",
+        "--write",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'",
+      "args": [
+        "--config",
+        "units.json",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'--check",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'--diff",
+      "args": [
+        "--config",
+        "units.json",
+        "--diff",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'--explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'--check---explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\n'--write",
+      "args": [
+        "--config",
+        "units.json",
+        "--write",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'",
+      "args": [
+        "--config",
+        "units.json",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'--check",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'--diff",
+      "args": [
+        "--config",
+        "units.json",
+        "--diff",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'--explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'--check---explain",
+      "args": [
+        "--config",
+        "units.json",
+        "--check",
+        "--explain",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "correction-utf16-'\\r\\n'--write",
+      "args": [
+        "--config",
+        "units.json",
+        "--write",
+        "units.txt"
+      ],
+      "files": {
+        "units.json": {
+          "text": "{\"presets\":false,\"input\":\"plain\",\"ruleGroups\":[{\"name\":\"custom\",\"rules\":[{\"id\":\"r\",\"pattern\":{\"source\":\"�\",\"flags\":\"g\"},\"replacement\":\"\\ud800\"}]}]}"
+        },
+        "units.txt": {
+          "text": "�\r\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-digit[[:digit:]]/😀.md",
+      "args": [
+        "--check",
+        "digit[[:digit:]]/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-digit[[:digit:]]/?.md",
+      "args": [
+        "--check",
+        "digit[[:digit:]]/?.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-digit[[:digit:]]/??.md",
+      "args": [
+        "--check",
+        "digit[[:digit:]]/??.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-!(!(b)).md",
+      "args": [
+        "--check",
+        "!(!(b)).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-@(!(!(b))).md",
+      "args": [
+        "--check",
+        "@(!(!(b))).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-!(!(b.md))",
+      "args": [
+        "--check",
+        "!(!(b.md))"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-@(!(!(b))|a).md",
+      "args": [
+        "--check",
+        "@(!(!(b))|a).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-+(!(!(b))|a).md",
+      "args": [
+        "--check",
+        "+(!(!(b))|a).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-?(!(!(b))).md",
+      "args": [
+        "--check",
+        "?(!(!(b))).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-glob-!(!(!(b))).md",
+      "args": [
+        "--check",
+        "!(!(!(b))).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-override-dir/😀.md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "b.md.md",
+        "dir/😀.md",
+        "digit1/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"dir/\\ud83d\\ude00.md\", \"options\": {\"presets\": false}}]}"
+        }
+      }
+    },
+    {
+      "name": "final-correction-override-digit[[:digit:]]/😀.md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "b.md.md",
+        "dir/😀.md",
+        "digit1/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"digit[[:digit:]]/\\ud83d\\ude00.md\", \"options\": {\"presets\": false}}]}"
+        }
+      }
+    },
+    {
+      "name": "final-correction-override-!(!(b)).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "b.md.md",
+        "dir/😀.md",
+        "digit1/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"!(!(b)).md\", \"options\": {\"presets\": false}}]}"
+        }
+      }
+    },
+    {
+      "name": "final-correction-override-@(!(!(b))).md",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "b.md.md",
+        "dir/😀.md",
+        "digit1/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"@(!(!(b))).md\", \"options\": {\"presets\": false}}]}"
+        }
+      }
+    },
+    {
+      "name": "final-correction-override-!(!(b.md))",
+      "args": [
+        "--check",
+        "--config",
+        "override.json",
+        "a.md",
+        "b.md",
+        "b.md.md",
+        "dir/😀.md",
+        "digit1/😀.md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "override.json": {
+          "text": "{\"overrides\": [{\"files\": \"!(!(b.md))\", \"options\": {\"presets\": false}}]}"
+        }
+      }
+    },
+    {
+      "name": "final-correction-absolute-utf16-sort---check",
+      "args": [
+        "--check",
+        "**/*.md",
+        "../outside.txt"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-absolute-utf16-sort---diff",
+      "args": [
+        "--diff",
+        "**/*.md",
+        "../outside.txt"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-absolute-utf16-sort---explain",
+      "args": [
+        "--check",
+        "--explain",
+        "**/*.md",
+        "../outside.txt"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-negative-tail-!(a!(b)).md",
+      "args": [
+        "--check",
+        "!(a!(b)).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-negative-tail-!(@(b)).md",
+      "args": [
+        "--check",
+        "!(@(b)).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-negative-tail-@(!(@(b))).md",
+      "args": [
+        "--check",
+        "@(!(@(b))).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-negative-tail-!(!(b)|a).md",
+      "args": [
+        "--check",
+        "!(!(b)|a).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-negative-tail-!(@(b)|a).md",
+      "args": [
+        "--check",
+        "!(@(b)|a).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "a/z.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "c.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "😀/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".md": {
+          "text": "\"Амбер\"\n"
+        },
+        "𐀀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "dir/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/😀.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "digit1/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        ".hidden.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "final-correction-adoptable-chain",
+      "args": [
+        "--check",
+        "@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(@(a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))).md"
+      ],
+      "files": {
+        "a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "b.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "walk-documents-write",
+      "args": [
+        "--write",
+        "walk"
+      ],
+      "files": {
+        "walk": {
+          "dir": true
+        },
+        "walk/package.json": {
+          "text": "{\"engines\": {\"node\": \">=26.13.1\"}}\n"
+        },
+        "walk/pnpm-lock.yaml": {
+          "text": "integrity: sha512-35e5\n"
+        },
+        "walk/requirements.txt": {
+          "text": "yaml>=6.0\n"
+        },
+        "walk/a.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "walk/b.mdx": {
+          "text": "\"Амбер\"\n"
+        },
+        "walk/c.html": {
+          "text": "\"Амбер\"\n"
+        },
+        "walk/d.htm": {
+          "text": "\"Амбер\"\n"
+        },
+        "walk/e.markdown": {
+          "text": "\"Амбер\"\n"
+        },
+        "walk/f.svg": {
+          "text": "<svg>\"Амбер\"</svg>\n"
+        },
+        "walk/g.toml": {
+          "text": "a = \"Амбер - да\"\n"
+        }
+      }
+    },
+    {
+      "name": "walk-documents-mask",
+      "args": [
+        "--check",
+        "walk/*.json"
+      ],
+      "files": {
+        "walk": {
+          "dir": true
+        },
+        "walk/package.json": {
+          "text": "{\"engines\": {\"node\": \">=26.13.1\"}}\n"
+        },
+        "walk/a.md": {
+          "text": "\"Амбер\"\n"
+        }
+      }
+    },
+    {
+      "name": "walk-documents-none",
+      "args": [
+        "--check",
+        "walk"
+      ],
+      "files": {
+        "walk": {
+          "dir": true
+        },
+        "walk/requirements.txt": {
+          "text": "\"Амбер\" - да\n"
+        }
+      }
+    },
+    {
+      "name": "walk-skips-link",
+      "args": [
+        "--write",
+        "repo"
+      ],
+      "files": {
+        "repo": {
+          "dir": true
+        },
+        "repo/docs": {
+          "dir": true
+        },
+        "victim.md": {
+          "text": "TOKEN=\"abc\" - да\n"
+        },
+        "repo/docs/intro.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "repo/docs/notes.md": {
+          "link": "../../victim.md"
+        }
+      }
+    },
+    {
+      "name": "mask-skips-link",
+      "args": [
+        "--write",
+        "repo/**/*.md"
+      ],
+      "files": {
+        "repo": {
+          "dir": true
+        },
+        "repo/docs": {
+          "dir": true
+        },
+        "victim.md": {
+          "text": "TOKEN=\"abc\" - да\n"
+        },
+        "repo/docs/intro.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "repo/docs/notes.md": {
+          "link": "../../victim.md"
+        }
+      }
+    },
+    {
+      "name": "mask-only-link",
+      "args": [
+        "--check",
+        "repo/docs/notes.*"
+      ],
+      "files": {
+        "repo": {
+          "dir": true
+        },
+        "repo/docs": {
+          "dir": true
+        },
+        "victim.md": {
+          "text": "TOKEN=\"abc\" - да\n"
+        },
+        "repo/docs/notes.md": {
+          "link": "../../victim.md"
+        }
+      }
+    },
+    {
+      "name": "brace-skips-link",
+      "args": [
+        "--check",
+        "repo/docs/{intro,notes}.md"
+      ],
+      "files": {
+        "repo": {
+          "dir": true
+        },
+        "repo/docs": {
+          "dir": true
+        },
+        "victim.md": {
+          "text": "TOKEN=\"abc\" - да\n"
+        },
+        "repo/docs/intro.md": {
+          "text": "\"Амбер\"\n"
+        },
+        "repo/docs/notes.md": {
+          "link": "../../victim.md"
+        }
+      }
+    },
+    {
+      "name": "named-link-followed",
+      "args": [
+        "repo/docs/notes.md"
+      ],
+      "files": {
+        "repo": {
+          "dir": true
+        },
+        "repo/docs": {
+          "dir": true
+        },
+        "victim.md": {
+          "text": "TOKEN=\"abc\" - да\n"
+        },
+        "repo/docs/notes.md": {
+          "link": "../../victim.md"
+        }
+      }
+    },
+    {
+      "name": "write-skips-unchanged-read-only",
+      "args": [
+        "--write",
+        "rodir"
+      ],
+      "files": {
+        "rodir": {
+          "dir": true
+        },
+        "rodir/a.md": {
+          "text": "Готово.\n",
+          "mode": 292
+        },
+        "rodir/b.md": {
+          "text": "Рэндом - брат\n"
+        }
+      }
+    },
+    {
+      "name": "write-changed-read-only",
+      "args": [
+        "--write",
+        "rodir"
+      ],
+      "files": {
+        "rodir": {
+          "dir": true
+        },
+        "rodir/a.md": {
+          "text": "Готово - да.\n",
+          "mode": 292
+        },
+        "rodir/b.md": {
+          "text": "Рэндом - брат\n"
+        }
+      }
+    },
+    {
+      "name": "input-flag-keeps-config-input",
+      "args": [
+        "--input",
+        "markdown",
+        "in.txt"
+      ],
+      "files": {
+        ".microtyporc.json": {
+          "text": "{\"input\": {\"pragmas\": \"microtypo\"}}"
+        },
+        "in.txt": {
+          "text": "<!-- microtypo-ignore-start -->\nКорвин - принц\n<!-- microtypo-ignore-end -->\n"
+        }
+      }
+    },
+    {
+      "name": "input-override-string-keeps-config-input",
+      "args": [
+        "in.txt"
+      ],
+      "files": {
+        ".microtyporc.json": {
+          "text": "{\"input\": {\"pragmas\": \"microtypo\"}, \"overrides\": [{\"files\": \"*.txt\", \"options\": {\"input\": \"markdown\"}}]}"
+        },
+        "in.txt": {
+          "text": "<!-- microtypo-ignore-start -->\nКорвин - принц\n<!-- microtypo-ignore-end -->\n"
+        }
+      }
+    },
+    {
+      "name": "input-config-string-under-override",
+      "args": [
+        "in.txt"
+      ],
+      "files": {
+        ".microtyporc.json": {
+          "text": "{\"input\": \"markdown\", \"overrides\": [{\"files\": \"*.txt\", \"options\": {\"input\": {\"pragmas\": \"microtypo\"}}}]}"
+        },
+        "in.txt": {
+          "text": "<!-- microtypo-ignore-start -->\nКорвин - принц\n<!-- microtypo-ignore-end -->\n# \"Заголовок\" - да\n"
+        }
+      }
+    },
+    {
+      "name": "input-config-string-invalid",
+      "args": [
+        "in.txt"
+      ],
+      "files": {
+        ".microtyporc.json": {
+          "text": "{\"input\": \"csv\"}"
+        },
+        "in.txt": {
+          "text": "Корвин - принц\n"
+        }
+      }
+    },
+    {
+      "name": "input-override-string-invalid",
+      "args": [
+        "in.txt"
+      ],
+      "files": {
+        ".microtyporc.json": {
+          "text": "{\"overrides\": [{\"files\": \"*.md\", \"options\": {\"input\": \"csv\"}}]}"
+        },
+        "in.txt": {
+          "text": "Корвин - принц\n"
+        }
+      }
+    }
+  ]
+}

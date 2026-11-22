@@ -17,6 +17,7 @@ flowchart LR
   core[microtypo-core] --> regress[vendor/regress]
   ffi[microtypo-ffi] --> core
   wasm[microtypo-wasm] --> core
+  cli[microtypo-cli] --> core
   conformance[microtypo-conformance] --> core
   swift[packages/swift] --> ffi
   npm[packages/npm] --> wasm
@@ -30,11 +31,12 @@ flowchart LR
 | `crates/microtypo-core` | engine: rules, input formats, markup protection, budgets; `forbid(unsafe_code)` |
 | `crates/microtypo-ffi` | C ABI, header in `include/microtypo.h`; the only workspace crate with `unsafe` |
 | `crates/microtypo-wasm` | `wasm-bindgen` boundary |
+| `crates/microtypo-cli` | `microtypo` binary: the reference CLI over the core; not part of the release set |
 | `crates/microtypo-conformance` | replays corpus cases against the core for the conformance test and, as a JSONL filter, for the fuzzer, `parity` and `matchers` |
 | `packages/npm` | `@meritt/microtypo-wasm`: JavaScript API over the module |
 | `packages/swift`, `Package.swift` | Swift package `MicroTypo` over the XCFramework |
 | `vendor/regress` | ECMAScript regex engine over UTF-16, prefilter, matcher generator |
-| `xtask` | header, builds, release set, corpus copy, parity guard, matcher generation, differential fuzzer, benchmark |
+| `xtask` | header, builds, release set, corpus copy, parity guard, CLI comparison, matcher generation, differential fuzzer, benchmark |
 
 Bindings depend on no workspace crate but the core. Core tests are `tests/behaviour` (library behaviour), `tests/growth` (linear scaling and timing), `tests/conformance.rs` and `tests/matchers.rs`.
 
@@ -107,9 +109,19 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - `cargo xtask parity` compares the reference's `DEFAULT_GROUPS` and the expressions its corpus runs (keyed as in `xtask/fuzz/patterns.mjs`, cached in `target/parity/`) with `microtypo-conformance --registry`: group order, title, classes, `preParse`, rule order, id, flags, description, requirements, kind, and each pattern's source as JavaScript spells it, flags and replacement. Escapes of characters from U+00A0 up are spelled out on both sides.
 - `xtask/parity/exceptions.mjs` lists each expected difference with its reason; an entry that no longer matches a difference is reported, so the list stays exact.
 
+## Command line
+
+- `microtypo` reproduces `src/cli/` of the reference: flags, `--config` and `.microtyporc.json` discovery and overrides, output, messages, exit codes, `util.parseArgs` tokens, `Number()` on flag values, Node.js wording of file-system errors and Node's stderr colour decisions. A non-finite number enters the config as `-0.5`, which the engine rejects with its infinity/NaN message. `--version` prints the port's version.
+- Defaults: 5 000 000 input units per file, 50 000 000 per batch, a pre-read cap of three bytes per unit. Every file gets its own configuration and engine; the batch is prepared before any write. A string `input` in any configuration layer merges as `{ format }`, keeping lower layers' input settings.
+- `-o` and `-w` write through a same-directory temporary file and a rename; `--write` leaves unchanged files untouched and checks writability only for changed ones. A write target named inside the working directory must resolve inside it.
+- File selection: a directory walk takes only markup formats (`.md`, `.markdown`, `.mdx`, `.html`, `.htm`); masks take every known format; an explicitly named file is taken whatever its extension, and an explicit symlink is followed, while walks and masks skip symlinks. Unreadable directories are skipped. A mask starting with `/` matches from the filesystem root. `.git`, `node_modules` and `.microtyporc.json` are excluded. Limits: 10 000 files, 100 000 matched entries, 30 seconds, and Node's brace bounds of 100 000 alternatives and 4 000 000 units. Paths sort by UTF-16; wildcard segments match case-insensitively on macOS and Windows, literal ones go through the filesystem.
+- The mask compiler parses extglobs with heap frames, not recursion, since masks come from arguments and configuration. `.microtypoignore` accepts only the restricted subset (no braces, extglobs or backslashes).
+- Input, output, comparisons and reported positions stay UTF-16; only stdout, diff line display and file writes encode UTF-8.
+- `cargo xtask cli` compares both CLIs on `xtask/cli/cases.json`; it leaves out simultaneous `FORCE_COLOR` and a disabling variable, for which Node prints a warning holding its process ID.
+
 ## Fuzzing and benchmark
 
-- `fuzz`, `bench`, and `parity` export the reference at the pinned commit with `git show` into `target/reference/`, since its working tree may already behave differently. Build outputs come from `CARGO_TARGET_DIR` when set.
+- `fuzz`, `bench`, `parity` and `cli` export the reference at the pinned commit with `git show` into `target/reference/`, since its working tree may already behave differently. Build outputs come from `CARGO_TARGET_DIR` when set.
 - A pattern is an expression the reference executes, keyed by source and flags. `xtask/fuzz/patterns.mjs` wraps `RegExp.prototype.exec`, which every `String` and `RegExp` method taking a regex goes through, and folds expressions built at run time (placeholder ids, rule selectors, safe tag names, safe block delimiters, reserved-character substitutes) to one key each.
 - Each run indexes which corpus cases each pattern matches; the index is cached in `target/fuzz/` by reference commit and the hash of `patterns.mjs`. Generated cases draw from that index, from the shapes of the reference's `test/conformance/build.mjs`, and, for one seed in 100, from focused forms in `generate.mjs`. Case `i` of seed `s` depends on nothing else, so runs split across workers and reproduce exactly. A change to the generator keeps both coverage floors.
 - Cases over the time budget, whose two reference runs differ, or that the replay cannot represent are skipped; the known lone-surrogate divergence is counted apart.
