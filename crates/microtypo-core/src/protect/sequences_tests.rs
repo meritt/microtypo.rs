@@ -1,32 +1,32 @@
 use super::{Census, SafeSequences, WHOLE_RE};
 use crate::js::{self, JsString};
 
-fn census(text: &[u16], nonce: &[u8]) -> Census {
+fn census(text: &[u16], stamp: &[u8]) -> Census {
     let mut sequences = SafeSequences::new(|bytes| bytes.fill(0));
-    sequences.nonce = String::from_utf8(nonce.to_vec()).unwrap();
+    sequences.nonce = String::from_utf8(stamp.to_vec()).unwrap();
     sequences.census(text)
 }
 
-fn assert_census(text: &[u16], nonce: &str) {
-    let nonce_units = js::u(nonce);
+fn assert_census(text: &[u16], stamp: &str) {
+    let stamp_units = js::u(stamp);
     let mut expected = [0; 4];
     for c in WHOLE_RE.find_all(text) {
-        if c.has(2) && c.s(2) == nonce_units.as_slice() {
+        if c.has(2) && c.s(2) == stamp_units.as_slice() {
             expected[0] += 1;
             expected[1] += usize::from(!c.has(1));
-        } else if c.has(3) && c.s(3) == nonce_units.as_slice() {
+        } else if c.has(3) && c.s(3) == stamp_units.as_slice() {
             expected[2] += 1;
-        } else if c.has(4) && c.s(4) == nonce_units.as_slice() {
+        } else if c.has(4) && c.s(4) == stamp_units.as_slice() {
             expected[3] += 1;
         }
     }
-    assert_eq!(census(text, nonce.as_bytes()), expected, "nonce={nonce}, text={text:?}");
+    assert_eq!(census(text, stamp.as_bytes()), expected, "stamp={stamp}, text={text:?}");
 }
 
-fn forms(nonce: &str) -> Vec<JsString> {
-    let core = format!("simonenko-xyz/A0SAFE{nonce}NUM0ID");
-    let email = format!("A1SAFE{nonce}NUM0ID@simonenko.xyz");
-    let token = format!("AzSAFE{nonce}TOK0TK");
+fn forms(stamp: &str) -> Vec<JsString> {
+    let core = format!("simonenko-xyz/A0SAFE{stamp}NUM0ID");
+    let email = format!("A1SAFE{stamp}NUM0ID@simonenko.xyz");
+    let token = format!("AzSAFE{stamp}TOK0TK");
     let mut forms = vec![
         core.clone(),
         format!("http://{core}"),
@@ -47,9 +47,9 @@ fn forms(nonce: &str) -> Vec<JsString> {
         token.clone(),
         format!("{core}{email}{token}"),
         format!("{token}{core}{email}"),
-        format!("A1SAFEF{nonce}NUM0ID@simonenko.xyz{core}"),
-        format!("AzSAFEF{nonce}TOK0TK{core}"),
-        format!("http://simonenko-xyz/A0SAFEF{nonce}NUM0ID{core}"),
+        format!("A1SAFEF{stamp}NUM0ID@simonenko.xyz{core}"),
+        format!("AzSAFEF{stamp}TOK0TK{core}"),
+        format!("http://simonenko-xyz/A0SAFEF{stamp}NUM0ID{core}"),
         format!("{core}NUM0ID{email}TOK0TK{token}"),
     ];
     for base in [&core, &email, &token] {
@@ -82,28 +82,28 @@ fn census_keeps_link_leads_distinct() {
 
 #[test]
 fn census_matches_whole_tokens_at_boundaries() {
-    for nonce in ["", "0", "0000000000000000", "0123456789ABCDEF", "FFFFFFFFFFFFFFFF"] {
-        for form in forms(nonce) {
+    for stamp in ["", "0", "0000000000000000", "0123456789ABCDEF", "FFFFFFFFFFFFFFFF"] {
+        for form in forms(stamp) {
             for offset in 0..=129 {
                 let mut text = vec![0xD800; offset];
                 text.extend_from_slice(&form);
                 text.extend_from_slice(&[0xDC00, 0x53, 0x41, 0x46, 0x45]);
-                assert_census(&text, nonce);
+                assert_census(&text, stamp);
             }
         }
         for n in [0, 1, 2, 63, 64, 65, 127, 128, 1024, 30_000] {
             let digits = "0".repeat(n);
             for text in [
-                format!("simonenko-xyz/A0SAFE{nonce}NUM{digits}ID"),
-                format!("http://simonenko-xyz/A0SAFE{nonce}NUM{digits}I"),
-                format!("<\u{e000}A{digits}\u{e001}>simonenko-xyz/A0SAFE{nonce}NUM0ID"),
-                format!("A1SAFE{nonce}NUM{digits}ID@simonenko.xyz"),
-                format!("AzSAFE{nonce}TOK{digits}TK"),
+                format!("simonenko-xyz/A0SAFE{stamp}NUM{digits}ID"),
+                format!("http://simonenko-xyz/A0SAFE{stamp}NUM{digits}I"),
+                format!("<\u{e000}A{digits}\u{e001}>simonenko-xyz/A0SAFE{stamp}NUM0ID"),
+                format!("A1SAFE{stamp}NUM{digits}ID@simonenko.xyz"),
+                format!("AzSAFE{stamp}TOK{digits}TK"),
                 format!("simonenko-xyz/A0SAFE{}NUM0ID", "F".repeat(n)),
                 format!("A1SAFE{}NUM0ID@simonenko.xyz", "F".repeat(n)),
                 format!("AzSAFE{}TOK0TK", "F".repeat(n)),
             ] {
-                assert_census(&js::u(&text), nonce);
+                assert_census(&js::u(&text), stamp);
             }
         }
     }
@@ -118,8 +118,8 @@ fn census_matches_whole_tokens_after_mutations() {
         seed ^= seed << 17;
         seed as usize
     };
-    for nonce in ["0", "0000000000000000", "0123456789ABCDEF", "FFFFFFFFFFFFFFFF"] {
-        let forms = forms(nonce);
+    for stamp in ["0", "0000000000000000", "0123456789ABCDEF", "FFFFFFFFFFFFFFFF"] {
+        let forms = forms(stamp);
         for _ in 0..4096 {
             let mut text = forms[next() % forms.len()].clone();
             text.extend_from_slice(&forms[next() % forms.len()]);
@@ -131,7 +131,7 @@ fn census_matches_whole_tokens_after_mutations() {
                 let to = (from + next() % 8).min(insert.len());
                 text.splice(at..end, insert[from..to].iter().copied());
             }
-            assert_census(&text, nonce);
+            assert_census(&text, stamp);
         }
     }
 }
@@ -159,11 +159,11 @@ fn census_stops_long_scans_on_the_host_budget() {
 
 #[test]
 fn census_matches_whole_tokens_across_scan_blocks() {
-    for nonce in ["0", "0123456789ABCDEF"] {
+    for stamp in ["0", "0123456789ABCDEF"] {
         let forms = [
-            format!("http://simonenko-xyz/A0SAFE{nonce}NUM0ID"),
-            format!("A1SAFE{nonce}NUM0ID@simonenko.xyz"),
-            format!("AzSAFE{nonce}TOK0TK"),
+            format!("http://simonenko-xyz/A0SAFE{stamp}NUM0ID"),
+            format!("A1SAFE{stamp}NUM0ID@simonenko.xyz"),
+            format!("AzSAFE{stamp}TOK0TK"),
         ];
         for offset in [0, 1, 15, 16, 17, 31, 32, 33, 65_535, 65_536, 65_537, 65_551, 65_552, 65_553] {
             for form in &forms {
@@ -171,18 +171,18 @@ fn census_matches_whole_tokens_across_scan_blocks() {
                     let mut text = vec![0xD800; offset];
                     text.extend(form.encode_utf16());
                     text.extend(std::iter::repeat_n(0xDC00, tail));
-                    assert_census(&text, nonce);
+                    assert_census(&text, stamp);
                 }
             }
         }
         for count in [0, 1, 15, 16, 17, 65_535, 65_536, 65_537] {
             let digits = "0".repeat(count);
             for text in [
-                format!("simonenko-xyz/A0SAFE{nonce}NUM{digits}ID"),
-                format!("A1SAFE{nonce}NUM{digits}ID@simonenko.xyz"),
-                format!("AzSAFE{nonce}TOK{digits}TK"),
+                format!("simonenko-xyz/A0SAFE{stamp}NUM{digits}ID"),
+                format!("A1SAFE{stamp}NUM{digits}ID@simonenko.xyz"),
+                format!("AzSAFE{stamp}TOK{digits}TK"),
             ] {
-                assert_census(&js::u(&text), nonce);
+                assert_census(&js::u(&text), stamp);
             }
         }
     }

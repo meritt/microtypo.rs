@@ -343,35 +343,35 @@ pub unsafe extern "C" fn microtypo_output_free(out: *mut Output) {
 }
 
 /// # Safety
-/// `error` came from this library and is not freed yet.
+/// `error` is `NULL`, which reads as `NULL`, or came from this library and is not freed yet.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn microtypo_error_name(error: *const Error) -> *const c_char {
-    // SAFETY: `error` is a live `Error`, as this function's contract states.
-    unsafe { (*error).name.as_ptr() }
+    // SAFETY: `error` is `NULL` or a live `Error`, as this function's contract states.
+    unsafe { error.as_ref() }.map_or(ptr::null(), |e| e.name.as_ptr())
 }
 
 /// # Safety
 /// As `microtypo_error_name`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn microtypo_error_message(error: *const Error) -> *const c_char {
-    // SAFETY: `error` is a live `Error`, as this function's contract states.
-    unsafe { (*error).message.as_ptr() }
+    // SAFETY: `error` is `NULL` or a live `Error`, as this function's contract states.
+    unsafe { error.as_ref() }.map_or(ptr::null(), |e| e.message.as_ptr())
 }
 
 /// # Safety
 /// As `microtypo_error_name`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn microtypo_error_code(error: *const Error) -> *const c_char {
-    // SAFETY: `error` is a live `Error`, as this function's contract states.
-    unsafe { (*error).code.as_ref().map_or(ptr::null(), |c| c.as_ptr()) }
+    // SAFETY: `error` is `NULL` or a live `Error`, as this function's contract states.
+    unsafe { error.as_ref() }.and_then(|e| e.code.as_ref()).map_or(ptr::null(), |c| c.as_ptr())
 }
 
 /// # Safety
 /// As `microtypo_error_name`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn microtypo_error_details(error: *const Error) -> *const c_char {
-    // SAFETY: `error` is a live `Error`, as this function's contract states.
-    unsafe { (*error).details.as_ref().map_or(ptr::null(), |c| c.as_ptr()) }
+    // SAFETY: `error` is `NULL` or a live `Error`, as this function's contract states.
+    unsafe { error.as_ref() }.and_then(|e| e.details.as_ref()).map_or(ptr::null(), |c| c.as_ptr())
 }
 
 /// # Safety
@@ -393,6 +393,17 @@ pub extern "C" fn microtypo_version() -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_accessors_read_null_as_null() {
+        // SAFETY: every accessor accepts `NULL`.
+        unsafe {
+            assert!(microtypo_error_name(ptr::null()).is_null());
+            assert!(microtypo_error_message(ptr::null()).is_null());
+            assert!(microtypo_error_code(ptr::null()).is_null());
+            assert!(microtypo_error_details(ptr::null()).is_null());
+        }
+    }
 
     #[test]
     fn diagnostics_owns_nested_utf16_buffers_and_recovers_after_errors() {
