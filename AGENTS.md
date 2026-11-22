@@ -20,7 +20,7 @@ brew install binaryen
 rustup toolchain install nightly-2026-11-20 --profile minimal --component miri,rust-src
 ```
 
-`wasm-opt` must report version 133.
+`wasm-opt` must report version 133. The Swift steps (`xcframework`, `swift-test`, `dist`) need Xcode 27 on macOS 27, which runs only on Apple silicon.
 
 ## Checks
 
@@ -68,11 +68,12 @@ cargo xtask header
 cargo xtask matchers
 cargo xtask wasm
 cargo xtask xcframework
+cargo xtask swift-test
 cargo xtask dist [<empty dir>]
 cargo xtask pin [--check] [<release set>]
 ```
 
-`matchers` regenerates `crates/microtypo-core/src/js/regex/matchers.rs`, the Rust matchers of the built-in regular expressions; run it after changing a built-in pattern or `vendor/regress`. `dist` builds the release set and installs each package as a consumer would; `pin` points `Package.swift` at the set's XCFramework.
+`matchers` regenerates `crates/microtypo-core/src/js/regex/matchers.rs`, the Rust matchers of the built-in regular expressions; run it after changing a built-in pattern or `vendor/regress`. `swift-test` builds the XCFramework and runs the Swift tests against it in a copy of the package, since `Package.swift` names only the release. `dist` builds the release set and installs each package as a consumer would; `pin` points `Package.swift` at the set's XCFramework.
 
 ## Release
 

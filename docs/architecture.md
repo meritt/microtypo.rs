@@ -85,11 +85,10 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 ## C ABI
 
 - Text crosses as UTF-16 plus length; configuration and call arguments as UTF-8 JSON shaped like the JavaScript objects.
-- A failing call returns `false` or `NULL` and, when `error` is not `NULL`, stores a `microtypo_error` there, freed with `microtypo_error_free`.
-- Panics are caught and returned as `InternalError`, as is `NULL` for the engine or the method name. Other pointers follow each function's `Safety` contract.
+- `microtypo_engine_process_diagnostics` takes the three flags; its `microtypo_output` owns the text, changes, edit replacements and trace buffers, all released by `microtypo_output_free`. `changes_len` and `ranges_len` count (start, end) pairs, so their flat buffers hold twice as many values. No pointer borrows engine storage.
+- A failing call returns `false` or `NULL` and, when `error` is not `NULL`, stores a `microtypo_error` freed with `microtypo_error_free`. Panics, and `NULL` for the engine or method name, become `InternalError`; other pointers follow each function's `# Safety` contract.
 - An engine is not thread-safe.
-- Every `unsafe` block carries a `SAFETY` note; tests run under Miri without the `mimalloc` feature, which Miri cannot execute.
-- `mimalloc` is on by default.
+- `mimalloc` is a default feature. Miri runs the crate's tests without it (Miri cannot execute it) and with `presets: false`, since compiling the built-in groups takes Miri hours, and on `plain` input with the input scanners (`placeholders`, `pragmas`, `attributes`) off, since markup formats and the scanners compile regular expressions that multiply its run time: Miri checks the boundary, the corpus and the fuzzer check the rules.
 
 ## WebAssembly package
 
@@ -102,7 +101,11 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 
 ## Swift package
 
-`Package.swift` sits at the repository root. A checkout with `packages/swift/MicroTypoFFI.xcframework` uses it; otherwise SwiftPM downloads the release XCFramework by the URL and checksum `cargo xtask pin` writes from the release set CI built. Headers live in a module-named folder so `module.modulemap` cannot collide with another XCFramework. `MicroTypo` serialises calls with `NSLock`, so one instance is shareable across threads. It checks values before `JSONSerialization`, which raises an uncatchable Objective-C exception on NaN, infinity or a non-JSON type. Deployment target: macOS 26.
+- `Package.swift` names one binary target, the release XCFramework, by the URL and checksum `cargo xtask pin` writes; it reads nothing from the checkout. `swift-test` and `dist` test a copy under `target/staging` pointed at the XCFramework or zip they built.
+- Headers sit in a module-named folder so `module.modulemap` cannot collide with another XCFramework. macOS 27 runs only on Apple silicon, so the XCFramework holds one `aarch64-apple-darwin` library.
+- Targets build in Swift 6 mode with strict memory safety and every warning as an error. `MicroTypo` is `@safe` and `Sendable`: the engine pointer lives in a `Mutex` and never leaves it; values crossing the lock, including copies of C output, are built inside it.
+- `Config` is not `Encodable`: `rules` is `KeyValuePairs` written in order, because `JSONEncoder` does not keep key order and the engine applies toggles in order. A non-finite number fails with `EncodingError` before the engine sees it.
+- Methods throw untyped: `MicroTypoError` (`name`, `message`, `code`, `detailsJSON`) or `EncodingError`. Diagnostics text, edit text and trace rule names are `[UInt16]`, so lone units survive.
 
 ## Parity guard
 

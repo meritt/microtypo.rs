@@ -9,7 +9,7 @@ use std::{env, fs};
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | dist [<dir>] \
+const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | swift-test | dist [<dir>] \
                      | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check] \
                      | parity [<src>] [--ref REV] | cli [<src>] [--ref REV] \
                      | fuzz <src> [--cases N] [--seed S] [--jobs N] [--ref REV] [--keep-going | --coverage] [--reuse] \
@@ -39,11 +39,11 @@ const MATCHER_SOURCE_LIMIT: usize = 5_000;
 const MATCHERS_LINTS: &str =
     "#![allow(clippy::all, clippy::pedantic, unused_labels, unused_mut, unused_variables, unreachable_code)]";
 
-const MACOS: &str = "26.0";
+const MACOS: &str = "27.0";
 
 const SOURCE_DATE_EPOCH: &str = "315532800";
 
-const APPLE_TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+const APPLE_TARGET: &str = "aarch64-apple-darwin";
 
 type Result<T = ()> = std::result::Result<T, String>;
 
@@ -55,6 +55,7 @@ fn main() -> ExitCode {
         ["header", "--check"] => header(true),
         ["wasm"] => wasm().map(drop),
         ["xcframework"] => xcframework().map(drop),
+        ["swift-test"] => swift_test(),
         ["dist"] => dist(None),
         ["dist", dir] => dist(Some(Path::new(dir))),
         ["pin"] => pin(false, None),
@@ -899,19 +900,15 @@ fn options<'a>(
 fn xcframework() -> Result<PathBuf> {
     let root = root();
     header(true)?;
-    let mut libraries = Vec::new();
-    for target in APPLE_TARGETS {
-        run(cargo().env("MACOSX_DEPLOYMENT_TARGET", MACOS).env("SOURCE_DATE_EPOCH", SOURCE_DATE_EPOCH).args([
-            "build",
-            "-p",
-            "microtypo-ffi",
-            "--release",
-            "--locked",
-            "--target",
-            target,
-        ]))?;
-        libraries.push(root.join(format!("target/{target}/release/libmicrotypo_ffi.a")));
-    }
+    run(cargo().env("MACOSX_DEPLOYMENT_TARGET", MACOS).env("SOURCE_DATE_EPOCH", SOURCE_DATE_EPOCH).args([
+        "build",
+        "-p",
+        "microtypo-ffi",
+        "--release",
+        "--locked",
+        "--target",
+        APPLE_TARGET,
+    ]))?;
 
     let work = root.join("target/staging/xcframework");
     fresh_dir(&work)?;
@@ -921,7 +918,7 @@ fn xcframework() -> Result<PathBuf> {
         copy(&include.join(file), &headers.join(file))?;
     }
     let library = work.join("libmicrotypo.a");
-    run(Command::new("lipo").arg("-create").args(&libraries).arg("-output").arg(&library))?;
+    copy(&target_dir().join(format!("{APPLE_TARGET}/release/libmicrotypo_ffi.a")), &library)?;
 
     let framework = root.join("packages/swift/MicroTypoFFI.xcframework");
     if framework.exists() {
@@ -993,7 +990,7 @@ fn dist(dir: Option<&Path>) -> Result {
         "product": "xcframework",
         "channel": "swiftpm",
         "module": "MicroTypoFFI",
-        "targets": APPLE_TARGETS,
+        "targets": [APPLE_TARGET],
         "macos": MACOS,
         "header": "microtypo.h",
         "size": size(&xcf)?,
@@ -1137,35 +1134,43 @@ fn check_npm(tgz: &Path) -> Result {
         .arg(consumer.join("node_modules/@meritt/microtypo-wasm/microtypo.js")))
 }
 
-fn check_swift(zip: &Path) -> Result {
+fn swift_test() -> Result {
+    let framework = xcframework()?;
+    let package = swift_package(&root().join("target/staging/swift-test"), &framework, "MicroTypoFFI.xcframework")?;
+    run(Command::new("swift").arg("test").arg("--package-path").arg(&package))
+}
+
+fn swift_package(dir: &Path, binary: &Path, name: &str) -> Result<PathBuf> {
     let root = root();
-    let consumer = root.join("target/staging/consumer/swift");
-    fresh_dir(&consumer)?;
-    let package = consumer.join("microtypo.rs");
+    fresh_dir(dir)?;
+    let package = dir.join("microtypo.rs");
     for item in ["Package.swift", "packages/swift/Sources", "packages/swift/Tests"] {
         copy(&root.join(item), &package.join(item))?;
     }
-    copy(zip, &package.join("MicroTypoFFI.xcframework.zip"))?;
+    copy(binary, &package.join(name))?;
     let manifest = package.join("Package.swift");
     let text = fs::read_to_string(&manifest).map_err(at(manifest.display()))?;
     let remote = r#".binaryTarget(name: "MicroTypoFFI", url: release.url, checksum: release.checksum)"#;
     if text.matches(remote).count() != 1 {
         return Err(format!("Package.swift needs one `{remote}`"));
     }
-    write(
-        &manifest,
-        &text.replace(remote, r#".binaryTarget(name: "MicroTypoFFI", path: "MicroTypoFFI.xcframework.zip")"#),
-    )?;
+    write(&manifest, &text.replace(remote, &format!(r#".binaryTarget(name: "MicroTypoFFI", path: "{name}")"#)))?;
+    Ok(package)
+}
+
+fn check_swift(zip: &Path) -> Result {
+    let consumer = root().join("target/staging/consumer/swift");
+    let package = swift_package(&consumer, zip, "MicroTypoFFI.xcframework.zip")?;
     run(Command::new("swift").arg("test").arg("--package-path").arg(&package))?;
 
     let app = consumer.join("app");
     write(
         &app.join("Package.swift"),
-        "// swift-tools-version: 6.2\n\
+        "// swift-tools-version: 6.4\n\
          import PackageDescription\n\n\
          let package = Package(\n    \
              name: \"App\",\n    \
-             platforms: [.macOS(.v26)],\n    \
+             platforms: [.macOS(.v27)],\n    \
              dependencies: [.package(path: \"../microtypo.rs\")],\n    \
              targets: [.executableTarget(name: \"App\", dependencies: [.product(name: \"MicroTypo\", package: \"microtypo.rs\")])]\n\
          )\n",
@@ -1173,7 +1178,7 @@ fn check_swift(zip: &Path) -> Result {
     write(
         &app.join("Sources/App/main.swift"),
         "import MicroTypo\n\n\
-         let text = try MicroTypo(config: [\"html\": false]).process(\"\\\"Амбер\\\" - город\")\n\
+         let text = try MicroTypo(config: .init(html: false)).process(\"\\\"Амбер\\\" - город\")\n\
          guard text == \"«Амбер»\\u{A0}— город\" else { fatalError(\"unexpected \\(text)\") }\n\
          print(\"MicroTypo \\(MicroTypo.version): the package resolves and runs\")\n",
     )?;

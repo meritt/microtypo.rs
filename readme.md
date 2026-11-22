@@ -55,9 +55,11 @@ typo.process('"Амбер" - город'); // '«Амбер» — город'
 ```swift
 import MicroTypo
 
-let typo = try MicroTypo(config: ["html": false])
+let typo = try MicroTypo(config: .init(html: false, rules: ["quote": false]))
 let text = try typo.process("\"Амбер\" - город")
 ```
+
+`MicroTypo.Config` повторяет поля конфига ядра; `rules` применяются в порядке записи. Ошибки движка приходят как `MicroTypoError`, неконечный `maxProcessingMs` отклоняется `EncodingError`. Экземпляр `Sendable`.
 
 ## Автор
 

@@ -117,7 +117,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     concurrency:
       group: ci-build-${{ github.event.pull_request.number || github.ref }}
@@ -125,7 +125,7 @@ jobs:
     permissions:
       contents: read
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

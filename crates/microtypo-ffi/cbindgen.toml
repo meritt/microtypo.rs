@@ -11,6 +11,8 @@ documentation = false
 "Engine" = "microtypo_engine"
 "Error" = "microtypo_error"
 "Output" = "microtypo_output"
+"Edit" = "microtypo_edit"
+"Trace" = "microtypo_trace"
 
 [fn]
 args = "auto"
