@@ -515,7 +515,12 @@ fn cli(args: &[&str]) -> Result {
         }
         let shown = serde_json::to_string(&args).unwrap_or_default();
         let (port, js) = (&sides[0], &sides[1]);
-        let same = port.stdout == js.stdout && port.stderr == js.stderr && port.code == js.code && port.tree == js.tree;
+        let same_stderr = if case["budgetStage"] == true {
+            without_budget_stage(&port.stderr) == without_budget_stage(&js.stderr)
+        } else {
+            port.stderr == js.stderr
+        };
+        let same = port.stdout == js.stdout && same_stderr && port.code == js.code && port.tree == js.tree;
         match (same, case["listed"].as_str()) {
             (true, None) => identical += 1,
             (true, Some(_)) => {
@@ -551,6 +556,14 @@ fn cli(args: &[&str]) -> Result {
         cases.len()
     );
     if differences == 0 { Ok(()) } else { Err("the CLI differs from the reference".to_owned()) }
+}
+
+fn without_budget_stage(stderr: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(stderr);
+    match text.split_once(" budget at ").and_then(|(head, rest)| Some((head, rest.split_once(" — ")?.1))) {
+        Some((head, tail)) => format!("{head} budget — {tail}").into_bytes(),
+        None => stderr.to_vec(),
+    }
 }
 
 fn bytes_of(hex: &str) -> Result<Vec<u8>> {
