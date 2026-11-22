@@ -271,6 +271,7 @@ impl Cover {
 /// \return one bit for each unit of \p block in the range of \p first and the \p span units
 /// after it, the first unit in the lowest bit. Each run of 16 units compiles to a few vector
 /// instructions.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 #[inline(always)]
 fn range_bits(block: &[u16; BLOCK], (first, span): (u16, u16)) -> u64 {
     block
@@ -281,6 +282,24 @@ fn range_bits(block: &[u16; BLOCK], (first, span): (u16, u16)) -> u64 {
                 held | u16::from(u.wrapping_sub(first) <= span) << k
             });
             bits | u64::from(held) << (16 * i)
+        })
+}
+
+/// \return one bit for each unit of \p block in the range of \p first and the \p span units
+/// after it, the first unit in the lowest bit. A size-optimized wasm build does not vectorize
+/// the portable loop.
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline(always)]
+fn range_bits(block: &[u16; BLOCK], (first, span): (u16, u16)) -> u64 {
+    use core::arch::wasm32::{u16x8_bitmask, u16x8_le, u16x8_splat, u16x8_sub, v128_load};
+    let (first, span) = (u16x8_splat(first), u16x8_splat(span));
+    block
+        .chunks_exact(8)
+        .enumerate()
+        .fold(0, |bits, (i, units)| {
+            // SAFETY: `units` holds the 16 bytes read, and the load has no alignment requirement.
+            let units = unsafe { v128_load(units.as_ptr().cast()) };
+            bits | u64::from(u16x8_bitmask(u16x8_le(u16x8_sub(units, first), span))) << (8 * i)
         })
 }
 
