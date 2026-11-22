@@ -110,7 +110,7 @@ impl Emitter {
     // Emit a sequence of code points, lowering to literal bytes (UTF-8).
     #[cfg(not(feature = "utf16"))]
     fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
-        let pieces = lower_code_point_sequence(cps, icase, self.result.flags.unicode);
+        let pieces = lower_code_point_sequence(cps, icase, self.result.flags.unicode_mode());
         for piece in pieces {
             self.emit_node(&Node::from(piece));
         }
@@ -119,7 +119,7 @@ impl Emitter {
     // Emit a sequence of code points, in a UTF-16 friendly way.
     #[cfg(feature = "utf16")]
     fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
-        let unicode = self.result.flags.unicode;
+        let unicode = self.result.flags.unicode_mode();
         for &cp in cps {
             let chars = unicode::expand_code_point(cp, icase, unicode);
             let node = match chars.len() {
@@ -450,6 +450,18 @@ impl Emitter {
 
 /// Compile the given IR to a CompiledRegex.
 pub fn emit(n: &ir::Regex) -> CompiledRegex {
+    emit_with(
+        n,
+        #[cfg(feature = "utf16")]
+        crate::FactorSource::default(),
+    )
+}
+
+/// Compile the given IR to a CompiledRegex, with the UTF-16 factor strings from \p factors.
+pub(crate) fn emit_with(
+    n: &ir::Regex,
+    #[cfg(feature = "utf16")] factors: crate::FactorSource,
+) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new(),
@@ -467,7 +479,9 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
             #[cfg(feature = "utf16")]
-            utf16: crate::utf16prefilter::prefilter_for_re(n),
+            utf16: crate::utf16prefilter::prefilter_for_re(n, factors),
+            #[cfg(feature = "utf16")]
+            attempt: None,
         },
     };
     emitter.emit_node(&n.node);

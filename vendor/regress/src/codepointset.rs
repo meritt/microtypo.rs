@@ -118,10 +118,6 @@ impl CodePointSet {
         CodePointSet { ivs: Vec::new() }
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.ivs.clear();
-    }
-
     // Return true if the set is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.ivs.is_empty()
@@ -155,6 +151,19 @@ impl CodePointSet {
         let res = CodePointSet { ivs };
         res.assert_is_well_formed();
         res
+    }
+
+    /// \return the set of the code points of \p ivs, which may come in any order and overlap.
+    pub(crate) fn from_intervals(mut ivs: Vec<Interval>) -> CodePointSet {
+        ivs.sort_unstable_by_key(|iv| iv.first);
+        let mut out: Vec<Interval> = Vec::with_capacity(ivs.len());
+        for iv in ivs {
+            match out.last_mut() {
+                Some(last) if last.mergeable(iv) => *last = merge_intervals(*last, &iv),
+                _ => out.push(iv),
+            }
+        }
+        CodePointSet::from_sorted_disjoint_intervals(out)
     }
 
     /// Add an interval of code points to the set.

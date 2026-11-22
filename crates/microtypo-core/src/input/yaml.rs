@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde_json::json;
@@ -349,7 +350,12 @@ fn end_of_node_properties(src: &[u16], i: usize, n: usize) -> usize {
     j
 }
 
-fn property_tag(src: &[u16], from: usize, to: usize) -> Option<JsString> {
+fn property_tag(
+    src: &[u16],
+    from: usize,
+    to: usize,
+    handles: &HashMap<JsString, JsString>,
+) -> Result<Option<JsString>> {
     let mut tag = None;
     let mut p = from;
 
@@ -383,8 +389,49 @@ fn property_tag(src: &[u16], from: usize, to: usize) -> Option<JsString> {
         }
     }
 
-    tag
+    let Some(tag) = tag else {
+        return Ok(None);
+    };
+    if tag == js::u("!") || tag.starts_with(&js::u("!<")) {
+        return Ok(Some(tag));
+    }
+    let handle_end = tag.iter().enumerate().skip(1).find_map(|(i, &c)| (c == BANG).then_some(i + 1)).unwrap_or(1);
+    let Some(prefix) = handles.get(&tag[..handle_end]) else {
+        return Ok(Some(tag));
+    };
+    let uri = crate::cat!(prefix, &tag[handle_end..]);
+    let decoded =
+        decode_tag_uri(&uri).ok_or_else(|| Error::input("Invalid YAML tag URI escape", json!({"offset":from})))?;
+    Ok(Some(crate::cat!("!<", decoded, ">")))
 }
+
+fn decode_tag_uri(uri: &[u16]) -> Option<JsString> {
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < uri.len() {
+        if uri[i] != 37 {
+            result.push(uri[i]);
+            i += 1;
+            continue;
+        }
+        let mut bytes = Vec::new();
+        while uri.get(i) == Some(&37) {
+            let hex = |c: u16| u8::try_from(c).ok().and_then(|b| (b as char).to_digit(16)).map(|v| v as u8);
+            let high = hex(*uri.get(i + 1)?)?;
+            let low = hex(*uri.get(i + 2)?)?;
+            bytes.push((high << 4) | low);
+            i += 3;
+        }
+        result.extend(std::str::from_utf8(&bytes).ok()?.encode_utf16());
+    }
+    Some(result)
+}
+
+fn default_tag_handles() -> HashMap<JsString, JsString> {
+    [(js::u("!"), js::u("!")), (js::u("!!"), js::u("tag:yaml.org,2002:"))].into_iter().collect()
+}
+static TAG_DIRECTIVE: LazyLock<Re> =
+    LazyLock::new(|| Re::new(r"^%TAG[ \t]+(![0-9A-Za-z-]*!|!)[ \t]+([^ \t]+)[ \t]*(?:#.*)?$", ""));
 
 #[derive(Debug, Clone, PartialEq)]
 enum KeyName {
@@ -412,7 +459,10 @@ fn is_lit(s: &[u16], lit: &str) -> bool {
     s.iter().copied().eq(lit.encode_utf16())
 }
 
-fn typed_key_name(tag: Option<&[u16]>, text: JsString) -> KeyName {
+fn typed_key_name(tag: Option<&[u16]>, text: JsString, empty: bool) -> KeyName {
+    if empty && tag.is_none() {
+        return KeyName::Named(js::u("null"));
+    }
     let Some(tag) = tag else { return KeyName::Named(text) };
 
     if is_lit(tag, "!") || is_lit(tag, "!!str") || is_lit(tag, "!<tag:yaml.org,2002:str>") {
@@ -482,8 +532,8 @@ fn set_flow_key(frame: &mut FlowFrame, key: KeyName, spans_len: usize) {
     }
 }
 
-fn name_flow_key(frame: &mut FlowFrame, tag: Option<&[u16]>, text: JsString, spans_len: usize) {
-    set_flow_key(frame, typed_key_name(tag, text), spans_len);
+fn name_flow_key(frame: &mut FlowFrame, tag: Option<&[u16]>, text: JsString, spans_len: usize, empty: bool) {
+    set_flow_key(frame, typed_key_name(tag, text, empty), spans_len);
 }
 
 fn end_flow_entry(frame: &mut FlowFrame, spans: &mut [LocatedSpan]) {
@@ -492,7 +542,7 @@ fn end_flow_entry(frame: &mut FlowFrame, spans: &mut [LocatedSpan]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the flow scanner's position, scalar, frame, path, output and tag")]
 fn record_flow_scalar(
     src: &[u16],
     n: usize,
@@ -518,7 +568,7 @@ fn record_flow_scalar(
         && !f.opaque
     {
         let name = quoted_key_name(&src[start + 1..quoted.end - 1], src[start]);
-        name_flow_key(f, tag, name, spans.len());
+        name_flow_key(f, tag, name, spans.len(), false);
     }
 }
 
@@ -585,16 +635,16 @@ fn nearest_of(src: &[u16], from: usize, chars: &[u16], found: &mut [Option<usize
     best
 }
 
-#[allow(clippy::too_many_arguments)]
 fn scan_flow_collection(
     src: &[u16],
     start: usize,
-    n: usize,
     base: &Chain,
     spans: &mut Vec<LocatedSpan>,
     check_budget: CheckBudget<'_>,
     cursors: &mut Cursors,
+    handles: &HashMap<JsString, JsString>,
 ) -> Result<Option<usize>> {
+    let n = src.len();
     let mut stack: Vec<FlowFrame> = Vec::new();
     let mut j = start;
     let mut can_open_quote = false;
@@ -629,7 +679,7 @@ fn scan_flow_collection(
         if (c == AMP || c == BANG) && can_open_quote {
             let end = end_of_node_properties(src, j, n);
 
-            tag = property_tag(src, j, end);
+            tag = property_tag(src, j, end, handles)?;
             j = end;
             tagged = true;
             continue;
@@ -741,10 +791,10 @@ fn scan_flow_collection(
             {
                 let text = plain_key_text(src, ks, j);
                 let len = spans.len();
-                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), text, len);
+                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), text, len, false);
             } else if awaits_key(frame) || frame.is_some_and(|f| f.seq && f.key.is_none()) {
                 let len = spans.len();
-                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), Vec::new(), len);
+                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), Vec::new(), len, true);
             }
 
             if let Some(frame) = stack.last_mut() {
@@ -786,7 +836,7 @@ fn scan_flow_collection(
                 let tag_arg = if tagged { tag.clone() } else { None };
                 let text = plain_key_text(src, j, colon);
                 let len = spans.len();
-                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), text, len);
+                name_flow_key(stack.last_mut().expect("frame"), tag_arg.as_deref(), text, len, false);
                 j = colon + 1;
                 can_open_quote = true;
                 tagged = false;
@@ -837,13 +887,13 @@ fn scan_flow_collection(
 fn flow_collection_end(
     src: &[u16],
     pos: usize,
-    n: usize,
     chain: &Chain,
     spans: &mut Vec<LocatedSpan>,
     check_budget: CheckBudget<'_>,
     cursors: &mut Cursors,
+    handles: &HashMap<JsString, JsString>,
 ) -> Result<usize> {
-    match scan_flow_collection(src, pos, n, chain, spans, check_budget, cursors)? {
+    match scan_flow_collection(src, pos, chain, spans, check_budget, cursors, handles)? {
         Some(end) => Ok(end),
         None => Err(Error::input(format!("Unclosed YAML flow collection at offset {pos}"), json!({ "offset": pos }))),
     }
@@ -902,6 +952,8 @@ struct Scanner<'a> {
     unnamed_indent: usize,
     skip_to: Option<usize>,
     mid_line: bool,
+    handles: HashMap<JsString, JsString>,
+    directives: Option<HashMap<JsString, JsString>>,
 }
 
 impl Scanner<'_> {
@@ -976,12 +1028,8 @@ impl Scanner<'_> {
         if p < line_end && src[p] == HASH { line_end } else { p }
     }
 
-    fn key_name(&self, pos: usize, node_start: usize, text: JsString) -> KeyName {
-        if node_start == pos {
-            KeyName::Named(text)
-        } else {
-            typed_key_name(property_tag(self.src, pos, node_start).as_deref(), text)
-        }
+    fn key_name(&self, pos: usize, node_start: usize, text: JsString, empty: bool) -> Result<KeyName> {
+        Ok(typed_key_name(property_tag(self.src, pos, node_start, &self.handles)?.as_deref(), text, empty))
     }
 
     fn key_chain(&mut self, chain: &Chain, name: KeyName, key_indent: usize) -> Chain {
@@ -994,9 +1042,7 @@ impl Scanner<'_> {
     }
 
     fn block_content_indent(&self, pos: usize, line_end: usize, indent: usize) -> isize {
-        for p in pos..line_end {
-            let ch = self.src[p];
-
+        for &ch in self.src.iter().take(line_end).skip(pos) {
             if (0x31..=0x39).contains(&ch) {
                 return (indent + usize::from(ch - 0x30)) as isize;
             }
@@ -1089,10 +1135,10 @@ impl Scanner<'_> {
         let cursors = self.cursors.get_or_insert_with(|| new_delimiter_cursors(src));
 
         if keep {
-            flow_collection_end(src, pos, self.n, &chain, &mut self.spans, self.check_budget, cursors)
+            flow_collection_end(src, pos, &chain, &mut self.spans, self.check_budget, cursors, &self.handles)
         } else {
             let mut sink = Vec::new();
-            flow_collection_end(src, pos, self.n, &None, &mut sink, self.check_budget, cursors)
+            flow_collection_end(src, pos, &None, &mut sink, self.check_budget, cursors, &self.handles)
         }
     }
 
@@ -1188,11 +1234,12 @@ impl Scanner<'_> {
 
             self.explicit_key_end = end as isize;
             self.explicit_key_below = kp >= line_end;
-            self.explicit_key_tag = if self.explicit_key_below { property_tag(src, key_start, line_end) } else { None };
+            self.explicit_key_tag =
+                if self.explicit_key_below { property_tag(src, key_start, line_end, &self.handles)? } else { None };
 
             self.explicit_key = Some(match text {
-                Some(text) => self.key_name(key_start, kp, text),
-                None if self.explicit_key_below => typed_key_name(self.explicit_key_tag.as_deref(), Vec::new()),
+                Some(text) => self.key_name(key_start, kp, text, false)?,
+                None if self.explicit_key_below => typed_key_name(self.explicit_key_tag.as_deref(), Vec::new(), true),
                 None => KeyName::Unnamed,
             });
 
@@ -1238,7 +1285,7 @@ impl Scanner<'_> {
             }
 
             let raw_key = &src[node_start + 1..result.end - 1];
-            let name = self.key_name(pos, node_start, decode_quoted_key(raw_key, q));
+            let name = self.key_name(pos, node_start, decode_quoted_key(raw_key, q), false)?;
             let full_chain = self.key_chain(&chain, name, key_indent);
 
             self.spans.push(LocatedSpan::with(
@@ -1275,9 +1322,10 @@ impl Scanner<'_> {
         };
 
         let written = plain_key_text(src, node_start, colon);
+        let empty = written.is_empty();
         let name = match pending_key {
             Some(key) if written.is_empty() => key,
-            _ => self.key_name(pos, node_start, written),
+            _ => self.key_name(pos, node_start, written, empty)?,
         };
         let full_chain = self.key_chain(&chain, name, key_indent);
 
@@ -1291,9 +1339,30 @@ impl Scanner<'_> {
     fn process_line(&mut self, p: usize, line_end: usize, indent: usize, line_start: usize) -> Result<()> {
         let src = self.src;
 
+        if p == line_start && js::starts_with_at(src, &js::u("%TAG"), p) && separates(src, p + 4, line_end) {
+            let directive = TAG_DIRECTIVE
+                .exec(&src[p..line_end])
+                .ok_or_else(|| Error::input("Malformed YAML TAG directive", json!({"offset":p})))?;
+            let handle = directive.s(1).to_vec();
+            let prefix = directive.s(2).to_vec();
+            let directives = self.directives.get_or_insert_with(HashMap::new);
+            if directives.contains_key(&handle) {
+                return Err(Error::input(
+                    "Duplicate YAML TAG directive handle",
+                    json!({"offset":p,"handle":js::lossy(&handle)}),
+                ));
+            }
+            directives.insert(handle, prefix);
+            return Ok(());
+        }
+
         if (js::starts_with_at(src, &[DASH, DASH, DASH], p) || js::starts_with_at(src, &[0x2E, 0x2E, 0x2E], p))
             && separates(src, p + 3, line_end)
         {
+            self.handles = default_tag_handles();
+            if let Some(directives) = self.directives.take() {
+                self.handles.extend(directives);
+            }
             self.stack.truncate(1);
             self.stack[0] = BlockFrame::new(0, None);
             self.pending_chain = None;
@@ -1476,7 +1545,8 @@ impl Scanner<'_> {
                     if !blank && self.explicit_key_below && src[p] != HASH {
                         let node = self.after_node_property(p, end);
 
-                        self.explicit_key_tag = property_tag(src, p, node).or(self.explicit_key_tag.take());
+                        self.explicit_key_tag =
+                            property_tag(src, p, node, &self.handles)?.or(self.explicit_key_tag.take());
 
                         if node < end {
                             let (text, key_end) = self.simple_key_text(node, end, self.run_indent);
@@ -1484,11 +1554,12 @@ impl Scanner<'_> {
                             self.explicit_key_below = false;
                             self.explicit_key = Some(match text {
                                 None => KeyName::Unnamed,
-                                Some(text) => typed_key_name(self.explicit_key_tag.as_deref(), text),
+                                Some(text) => typed_key_name(self.explicit_key_tag.as_deref(), text, false),
                             });
                             self.explicit_key_end = key_end as isize;
                         } else {
-                            self.explicit_key = Some(typed_key_name(self.explicit_key_tag.as_deref(), Vec::new()));
+                            self.explicit_key =
+                                Some(typed_key_name(self.explicit_key_tag.as_deref(), Vec::new(), true));
                         }
                     }
 
@@ -1560,6 +1631,8 @@ pub fn scan_yaml(source: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<Lo
         unnamed_indent: 0,
         skip_to: None,
         mid_line: false,
+        handles: default_tag_handles(),
+        directives: None,
     };
 
     scanner.run()?;

@@ -1,12 +1,13 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
+default-members = ["crates/microtypo-core", "crates/microtypo-cli"]
 exclude = ["vendor/regress", "spike"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.100"
 license = "MIT"
 authors = ["Alexey Simonenko <alexey@simonenko.dev>"]
 repository = "https://github.com/meritt/microtypo.rs"
@@ -54,4 +55,7 @@ codegen-units = 1
 
 [profile.wasm]
 inherits = "release"
-opt-level = "s"
+opt-level = "z"
+
+[profile.wasm.package.regress]
+opt-level = 2

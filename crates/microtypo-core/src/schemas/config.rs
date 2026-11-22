@@ -1,31 +1,46 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde_json::{Map, Value, json};
 
-use crate::core::options::{KNOWN_GROUPS, SETTING_SELECTORS, canonical_group_name, is_bundle, wildcard_to_regex};
+use crate::core::options::{KNOWN_GROUPS, SETTING_SELECTORS, is_bundle, is_on, wildcard_to_regex_units};
 use crate::errors::{Error, Result};
+use crate::js::raw_json::Node;
 use crate::js::{self, Re};
 
-fn selector_matches_rule(group: &str, selector: &str) -> Result<bool> {
-    if selector == "*" {
+pub type RuleCatalogue = HashMap<js::JsString, Vec<js::JsString>>;
+
+fn selector_matches_rule(group: &[u16], selector: &[u16], catalogue: &RuleCatalogue) -> Result<bool> {
+    if selector == js::u("*") {
         return Ok(true);
     }
-    let ids = crate::rules::registry::default_rule_ids(group);
-    let re = wildcard_to_regex(selector)?;
-    Ok(ids.iter().any(|id| re.test(&js::u(id))))
+    let re = wildcard_to_regex_units(selector)?;
+    Ok(catalogue.get(group).map_or_else(
+        || crate::rules::registry::default_rule_ids(&js::lossy(group)).iter().any(|id| re.test(&js::u(id))),
+        |ids| ids.iter().any(|id| re.test(id)),
+    ))
 }
 
-const TOP_LEVEL_KEYS: [&str; 8] =
-    ["entities", "maxInputLength", "maxProcessingMs", "input", "presets", "html", "rules", "render"];
+const TOP_LEVEL_KEYS: [&str; 9] =
+    ["entities", "maxInputLength", "maxProcessingMs", "input", "presets", "html", "rules", "render", "ruleGroups"];
 const RENDER_KEYS: [&str; 6] = ["paragraphs", "autolink", "breakline", "nowrap", "hanging", "prefix"];
 
 pub static UNSAFE_PREFIX_RE: LazyLock<Re> = LazyLock::new(|| Re::new(r#"["<>&\s]"#, ""));
 
 const MAX_INPUT_LENGTH: f64 = 5_000_000.0;
 
-pub const INPUT_FORMATS: [&str; 8] = ["text", "html", "markdown", "json", "xml", "toml", "yaml", "frontmatter"];
+pub const INPUT_FORMATS: [&str; 10] =
+    ["text", "html", "plain", "markdown", "mdx", "json", "xml", "toml", "yaml", "frontmatter"];
 pub const INPUT_TEMPLATES: [&str; 8] = ["off", "handlebars", "mustache", "twig", "jinja", "nunjucks", "liquid", "erb"];
-const INPUT_KEYS: [&str; 4] = ["format", "fields", "exclude", "template"];
+pub const INPUT_PLACEHOLDERS: [&str; 5] = ["off", "icu", "printf", "interpolation", "all"];
+pub const INPUT_PRAGMAS: [&str; 2] = ["off", "microtypo"];
+const INPUT_KEYS: [&str; 8] =
+    ["format", "fields", "exclude", "template", "placeholders", "pragmas", "math", "attributes"];
+const TEXT_ATTRIBUTES: [&str; 5] = ["alt", "title", "aria-label", "placeholder", "content"];
+
+fn all_attributes() -> Vec<String> {
+    TEXT_ATTRIBUTES.map(str::to_owned).to_vec()
+}
 
 fn input_format_message() -> String {
     format!("expected one of {}", INPUT_FORMATS.join("|"))
@@ -48,13 +63,26 @@ fn string_array(value: &Value) -> Option<Vec<String>> {
 pub struct InputConfig {
     pub format: String,
     pub template: String,
+    pub placeholders: String,
+    pub pragmas: String,
+    pub math: bool,
+    pub attributes: Vec<String>,
     pub fields: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
 }
 
 impl InputConfig {
     fn plain(format: &str) -> Self {
-        InputConfig { format: format.to_owned(), template: "off".to_owned(), fields: None, exclude: None }
+        InputConfig {
+            format: format.to_owned(),
+            template: "off".to_owned(),
+            placeholders: "all".to_owned(),
+            pragmas: "microtypo".to_owned(),
+            math: true,
+            attributes: all_attributes(),
+            fields: None,
+            exclude: None,
+        }
     }
 }
 
@@ -106,7 +134,40 @@ fn normalise_input(input: Option<&Value>, issues: &mut Vec<String>) -> InputConf
     {
         issues.push(format!("input.template: expected one of {}", INPUT_TEMPLATES.join("|")));
     }
-    let mut normalised = InputConfig { format, template, fields: None, exclude: None };
+    let mut read_mode = |key: &str, allowed: &[&str], default: &str| {
+        let value = match obj.get(key) {
+            None | Some(Value::Null) => default.to_owned(),
+            Some(Value::String(value)) => value.clone(),
+            Some(other) => other.to_string(),
+        };
+        if !allowed.contains(&value.as_str()) || !matches!(obj.get(key), None | Some(Value::Null | Value::String(_))) {
+            issues.push(format!("input.{key}: expected one of {}", allowed.join("|")));
+        }
+        value
+    };
+    let placeholders = read_mode("placeholders", &INPUT_PLACEHOLDERS, "all");
+    let pragmas = read_mode("pragmas", &INPUT_PRAGMAS, "microtypo");
+    if obj.get("math").is_some_and(|v| !is_booleanish(v)) {
+        issues.push("input.math: expected a boolean".to_owned());
+    }
+    let math = match obj.get("math") {
+        None | Some(Value::Null) => true,
+        Some(value) => is_on(value),
+    };
+    let attributes = obj.get("attributes").map_or_else(|| Some(all_attributes()), string_array);
+    if attributes.as_ref().is_none_or(|names| names.iter().any(|n| !TEXT_ATTRIBUTES.contains(&n.as_str()))) {
+        issues.push("input.attributes: expected an array of alt|title|aria-label|placeholder|content".to_owned());
+    }
+    let mut normalised = InputConfig {
+        format,
+        template,
+        placeholders,
+        pragmas,
+        math,
+        attributes: attributes.unwrap_or_else(all_attributes),
+        fields: None,
+        exclude: None,
+    };
     if let Some(fields) = obj.get("fields") {
         match string_array(fields) {
             Some(f) => normalised.fields = Some(f),
@@ -143,11 +204,20 @@ fn check_booleanish(cfg: &Map<String, Value>, key: &str, label: &str, issues: &m
 }
 
 pub fn validate_config(config: Option<&Value>) -> Result<ValidatedConfig> {
+    validate_config_with(config, &HashMap::new())
+}
+
+pub fn validate_config_with(config: Option<&Value>, registered: &RuleCatalogue) -> Result<ValidatedConfig> {
+    validate_config_node(Node::root(config.unwrap_or(&Value::Null), None), registered)
+}
+
+pub fn validate_config_node(input: Node<'_>, registered: &RuleCatalogue) -> Result<ValidatedConfig> {
+    let rule_entries = input.key("rules").entries();
     let empty = Map::new();
-    let cfg = match config {
-        None | Some(Value::Null) => &empty,
-        Some(Value::Object(o)) => o,
-        Some(other) => {
+    let cfg = match input.value {
+        Value::Null => &empty,
+        Value::Object(o) => o,
+        other => {
             let got = if other.is_array() { "an array" } else { type_name(other) };
             return Err(Error::config(
                 format!("invalid config: expected an object, got {got}"),
@@ -156,6 +226,31 @@ pub fn validate_config(config: Option<&Value>) -> Result<ValidatedConfig> {
         }
     };
     let mut issues: Vec<String> = Vec::new();
+    if let Some(groups) = cfg.get("ruleGroups") {
+        let _ = groups;
+        super::data_rules::validate_data_groups(input.key("ruleGroups"), &mut issues)?;
+    }
+    let mut catalogue = registered.clone();
+    if let Some(groups) = cfg.get("ruleGroups").and_then(Value::as_array) {
+        for (index, group) in groups.iter().enumerate() {
+            if let (Some(_name), Some(rules)) = (
+                group.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()),
+                group.get("rules").and_then(Value::as_array),
+            ) {
+                catalogue.insert(
+                    js::to_lower(&input.key("ruleGroups").index(index).key("name").units()),
+                    rules
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r.get("id").is_some_and(Value::is_string))
+                        .map(|(rule_index, _)| {
+                            input.key("ruleGroups").index(index).key("rules").index(rule_index).key("id").units()
+                        })
+                        .collect(),
+                );
+            }
+        }
+    }
     for key in cfg.keys() {
         if !TOP_LEVEL_KEYS.contains(&key.as_str()) {
             issues.push(format!("unknown option: {key}"));
@@ -226,29 +321,32 @@ pub fn validate_config(config: Option<&Value>) -> Result<ValidatedConfig> {
         match rules.as_object() {
             None => issues.push("rules: expected an object".to_owned()),
             Some(rules) => {
-                for (key, value) in rules {
-                    if !is_booleanish(value) {
+                let _ = rules;
+                for (key_units, value) in rule_entries {
+                    let key = js::lossy(&key_units);
+                    if !is_booleanish(&value) {
                         issues.push(format!("rules: \"{key}\" expected a boolean"));
                     }
-                    if is_bundle(key) {
+                    if is_bundle(&key) {
                         continue;
                     }
-                    let Some(dot) = key.find('.') else {
-                        if !KNOWN_GROUPS.contains(&canonical_group_name(key).as_str()) {
+                    let Some(dot) = key_units.iter().position(|&c| c == 0x2e) else {
+                        let group = js::to_lower(&key_units);
+                        if !catalogue.contains_key(&group) && !KNOWN_GROUPS.iter().any(|name| js::u(name) == group) {
                             issues.push(format!("rules: unknown key \"{key}\""));
                         }
                         continue;
                     };
-                    let group_raw = &key[..dot];
-                    let group = canonical_group_name(group_raw);
-                    if !KNOWN_GROUPS.contains(&group.as_str()) {
+                    let group_raw = js::lossy(&key_units[..dot]);
+                    let group = js::to_lower(&key_units[..dot]);
+                    if !catalogue.contains_key(&group) && !KNOWN_GROUPS.iter().any(|name| js::u(name) == group) {
                         issues.push(format!("rules: unknown group \"{group_raw}\""));
                         continue;
                     }
                     if SETTING_SELECTORS.contains(&key.as_str()) {
                         continue;
                     }
-                    if !selector_matches_rule(&group, &key[dot + 1..])? {
+                    if !selector_matches_rule(&group, &key_units[dot + 1..], &catalogue)? {
                         issues.push(format!("rules: \"{key}\" does not match any rule id in group \"{group_raw}\""));
                     }
                 }

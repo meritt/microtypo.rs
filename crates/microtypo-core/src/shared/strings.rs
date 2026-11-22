@@ -3,6 +3,16 @@ use std::sync::LazyLock;
 use crate::errors::Result;
 use crate::js::{self, JsString, Re};
 
+pub const WHITESPACE: &str = " \t\n\r\u{B}\u{C}\u{A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}";
+
+pub fn is_backslash_escaped(text: &[u16], at: usize) -> bool {
+    let mut start = at;
+    while start > 0 && text[start - 1] == 0x5C {
+        start -= 1;
+    }
+    (at - start) % 2 == 1
+}
+
 pub fn cycle<F>(
     text: &[u16],
     mut f: F,
@@ -14,9 +24,10 @@ where
     F: FnMut(&[u16]) -> Result<JsString>,
 {
     let mut current = text.to_vec();
+    check_budget("cycle")?;
     for _ in 0..max_iter {
-        check_budget("cycle")?;
         let next = f(&current)?;
+        check_budget("cycle")?;
         if next == current {
             return Ok(current);
         }
@@ -27,19 +38,28 @@ where
 }
 
 pub fn trim_blank_lines(text: &[u16], is_blank: &dyn Fn(&[u16]) -> bool) -> JsString {
-    let lines = js::split(text, &[0x0A]);
-    let mut start = 0usize;
-    let mut end = lines.len() as isize - 1;
-    while start < lines.len() && is_blank(lines[start]) {
-        start += 1;
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < text.len() {
+        if matches!(text[at], 0x0D | 0x0A) {
+            lines.push((start, at));
+            at += if text[at] == 0x0D && text.get(at + 1) == Some(&0x0A) { 2 } else { 1 };
+            start = at;
+        } else {
+            at += 1;
+        }
     }
-    while end >= start as isize && is_blank(lines[end as usize]) {
-        end -= 1;
+    lines.push((start, text.len()));
+    let mut from = 0;
+    let mut to = lines.len();
+    while from < to && is_blank(&text[lines[from].0..lines[from].1]) {
+        from += 1;
     }
-    if end < start as isize {
-        return Vec::new();
+    while to > from && is_blank(&text[lines[to - 1].0..lines[to - 1].1]) {
+        to -= 1;
     }
-    js::join(&lines[start..=end as usize], &[0x0A])
+    if from == to { Vec::new() } else { text[lines[from].0..lines[to - 1].1].to_vec() }
 }
 
 fn is_whitespace_code(code: Option<u32>) -> bool {
@@ -69,14 +89,37 @@ pub fn edge_whitespace(text: &[u16]) -> Edges {
     Edges { start, end }
 }
 
-pub fn leading_indent(text: &[u16]) -> (usize, usize) {
-    let end = edge_whitespace(text).start;
-    let mut start = end;
-    while start > 0 && (text[start - 1] == 0x20 || text[start - 1] == 0x09) {
-        start -= 1;
+pub fn leading_indent(
+    text: &[u16],
+    read_scalar: fn(&[u16], usize) -> (JsString, usize),
+    check_budget: &dyn Fn(&str) -> Result<()>,
+) -> Result<(usize, usize)> {
+    let mut end = 0;
+    let mut start = 0;
+    let mut opens_line = true;
+    let mut previous = None;
+    let mut steps = 0usize;
+    while end < text.len() {
+        if steps & 1023 == 0 {
+            check_budget("leadingIndent")?;
+        }
+        steps += 1;
+        let (glyph, next) = read_scalar(text, end);
+        if glyph.len() != 1 || !is_whitespace_code(Some(u32::from(glyph[0]))) {
+            break;
+        }
+        let ascii = matches!(glyph[0], 0x20 | 0x09);
+        if !ascii || !matches!(previous, Some(0x20 | 0x09)) {
+            start = if ascii { end } else { next };
+            opens_line = ascii && (end == 0 || matches!(previous, Some(0x0A | 0x0D)));
+        }
+        previous = Some(glyph[0]);
+        end = next;
     }
-    let opens_line = start == 0 || text[start - 1] == 0x0A || text[start - 1] == 0x0D;
-    if opens_line && end < text.len() { (start, end) } else { (end, end) }
+    if end == text.len() {
+        return Ok((0, end));
+    }
+    Ok(if opens_line { (start, end) } else { (end, end) })
 }
 
 static LONE_CR_RE: LazyLock<Re> = LazyLock::new(|| Re::new(r"\r(?!\n)", "g"));
@@ -108,8 +151,4 @@ pub fn count(haystack: &[u16], needle: &[u16]) -> usize {
         pos = at + needle.len();
     }
     n
-}
-
-pub fn count_unit(haystack: &[u16], unit: u16) -> usize {
-    haystack.iter().filter(|&&c| c == unit).count()
 }

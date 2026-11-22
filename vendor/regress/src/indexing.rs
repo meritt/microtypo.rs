@@ -128,30 +128,91 @@ where
         search: &Search,
     ) -> Option<Self::Position>;
 
-    /// \return the first position at or right of \p pos, stepping as next_right_pos does, whose
-    /// code unit is in \p units and, given \p second, is followed by a unit in it; or None if
-    /// there is none. Byte inputs do not filter.
+    /// \return the first position at or right of \p pos and at or left of \p limit, stepping as
+    /// next_right_pos does, where \p prefilter allows a match to start, or None if there is
+    /// none. \p scan carries what one search learned to the next one over the same input. Byte
+    /// inputs do not filter.
     #[cfg(feature = "utf16")]
     #[inline(always)]
     fn find_start_unit(
         &self,
         pos: Self::Position,
-        _units: &crate::utf16prefilter::UnitSet,
-        _second: Option<&crate::utf16prefilter::UnitSet>,
+        limit: Self::Position,
+        _prefilter: &crate::utf16prefilter::Utf16Prefilter,
+        _scan: &mut crate::utf16prefilter::UnitScan,
+    ) -> Option<Self::Position> {
+        (pos <= limit).then_some(pos)
+    }
+
+    /// \return the run around \p at, a start of one of the strings of \p factors, of units
+    /// every match consumes, from no further left than \p pos, as its first position and the
+    /// position right of it; None if \p factors know no such units. Byte inputs do not filter.
+    #[cfg(feature = "utf16")]
+    #[inline(always)]
+    fn factor_run(
+        &self,
+        _pos: Self::Position,
+        _at: Self::Position,
+        _factors: &crate::utf16factors::Factors,
+    ) -> Option<(Self::Position, Self::Position)> {
+        None
+    }
+
+    /// \return the first position at or right of \p pos whose code unit is in the required set
+    /// \p i of \p prefilter, or None if there is none. Byte inputs do not filter.
+    #[cfg(feature = "utf16")]
+    #[inline(always)]
+    fn find_required_unit(
+        &self,
+        pos: Self::Position,
+        _prefilter: &crate::utf16prefilter::Utf16Prefilter,
+        _i: usize,
     ) -> Option<Self::Position> {
         Some(pos)
     }
 
-    /// \return the first position at or right of \p pos whose code unit is in \p units, or
+    /// \return the last position at or right of \p pos whose code unit is in the required set
+    /// \p i of \p prefilter, or None if there is none. Byte inputs do not filter.
+    #[cfg(feature = "utf16")]
+    #[inline(always)]
+    fn rfind_required_unit(
+        &self,
+        _pos: Self::Position,
+        _prefilter: &crate::utf16prefilter::Utf16Prefilter,
+        _i: usize,
+    ) -> Option<Self::Position> {
+        Some(self.right_end())
+    }
+
+    /// \return the first start at or right of \p pos of one of the strings of \p factors, or
     /// None if there is none. Byte inputs do not filter.
     #[cfg(feature = "utf16")]
     #[inline(always)]
-    fn find_unit(
+    fn find_factor(
         &self,
         pos: Self::Position,
-        _units: &crate::utf16prefilter::UnitSet,
+        _factors: &crate::utf16factors::Factors,
     ) -> Option<Self::Position> {
         Some(pos)
+    }
+
+    /// \return the last start at or right of \p pos of one of the strings of \p factors, or
+    /// None if there is none. Byte inputs do not filter.
+    #[cfg(feature = "utf16")]
+    #[inline(always)]
+    fn rfind_factor(
+        &self,
+        _pos: Self::Position,
+        _factors: &crate::utf16factors::Factors,
+    ) -> Option<Self::Position> {
+        Some(self.right_end())
+    }
+
+    /// \return the code units of a UTF-16 or UCS-2 input, which a matcher compiled ahead of time
+    /// reads. Byte inputs have none and never run such a matcher.
+    #[cfg(feature = "utf16")]
+    fn code_units(&self) -> &[u16] {
+        unreachable!("Only UTF-16 and UCS-2 inputs run matchers compiled ahead of time")
     }
 
     /// Peek at the char to the right of a position, without changing that position.
@@ -904,26 +965,33 @@ impl<'a> Utf16Input<'a> {
         debug_assert!(self.left_end() <= pos && pos <= self.right_end());
         self
     }
+}
 
-    const SURROGATE_HIGH_START: u16 = 0xD800;
-    const SURROGATE_HIGH_END: u16 = 0xDBFF;
-    const SURROGATE_LOW_START: u16 = 0xDC00;
-    const SURROGATE_LOW_END: u16 = 0xDFFF;
+#[cfg(feature = "utf16")]
+const SURROGATE_HIGH_START: u16 = 0xD800;
+#[cfg(feature = "utf16")]
+const SURROGATE_HIGH_END: u16 = 0xDBFF;
+#[cfg(feature = "utf16")]
+const SURROGATE_LOW_START: u16 = 0xDC00;
+#[cfg(feature = "utf16")]
+const SURROGATE_LOW_END: u16 = 0xDFFF;
 
-    #[inline(always)]
-    fn is_high_surrogate(b: u16) -> bool {
-        b >= Self::SURROGATE_HIGH_START && b <= Self::SURROGATE_HIGH_END
-    }
+#[cfg(feature = "utf16")]
+#[inline(always)]
+pub(crate) fn is_high_surrogate(b: u16) -> bool {
+    b >= SURROGATE_HIGH_START && b <= SURROGATE_HIGH_END
+}
 
-    #[inline(always)]
-    fn is_low_surrogate(b: u16) -> bool {
-        b >= Self::SURROGATE_LOW_START && b <= Self::SURROGATE_LOW_END
-    }
+#[cfg(feature = "utf16")]
+#[inline(always)]
+pub(crate) fn is_low_surrogate(b: u16) -> bool {
+    b >= SURROGATE_LOW_START && b <= SURROGATE_LOW_END
+}
 
-    #[inline(always)]
-    fn code_point_from_surrogates(high: u16, low: u16) -> u32 {
-        (((high & 0x3ff) as u32) << 10 | (low & 0x3ff) as u32) + 0x1_0000
-    }
+#[cfg(feature = "utf16")]
+#[inline(always)]
+pub(crate) fn code_point_from_surrogates(high: u16, low: u16) -> u32 {
+    (((high & 0x3ff) as u32) << 10 | (low & 0x3ff) as u32) + 0x1_0000
 }
 
 /// Defines a thread's pool of emptied search state for one input type, and the trait methods
@@ -971,6 +1039,65 @@ macro_rules! pooled_buffers {
     };
 }
 
+#[cfg(feature = "utf16")]
+macro_rules! unit_searches {
+    () => {
+        #[inline(always)]
+        fn find_required_unit(
+            &self,
+            pos: Self::Position,
+            prefilter: &crate::utf16prefilter::Utf16Prefilter,
+            i: usize,
+        ) -> Option<Self::Position> {
+            let at = prefilter.find_required(i, self.input, self.pos_to_offset(pos))?;
+            Some(Self::Position::new(at))
+        }
+
+        #[inline(always)]
+        fn rfind_required_unit(
+            &self,
+            pos: Self::Position,
+            prefilter: &crate::utf16prefilter::Utf16Prefilter,
+            i: usize,
+        ) -> Option<Self::Position> {
+            let at = prefilter.rfind_required(i, self.input, self.pos_to_offset(pos))?;
+            Some(Self::Position::new(at))
+        }
+
+        #[inline(always)]
+        fn find_factor(
+            &self,
+            pos: Self::Position,
+            factors: &crate::utf16factors::Factors,
+        ) -> Option<Self::Position> {
+            let at = factors.find(self.input, self.pos_to_offset(pos))?;
+            Some(Self::Position::new(at))
+        }
+
+        #[inline(always)]
+        fn rfind_factor(
+            &self,
+            pos: Self::Position,
+            factors: &crate::utf16factors::Factors,
+        ) -> Option<Self::Position> {
+            let at = factors.rfind(self.input, self.pos_to_offset(pos))?;
+            Some(Self::Position::new(at))
+        }
+
+        #[inline(always)]
+        fn factor_run(
+            &self,
+            pos: Self::Position,
+            at: Self::Position,
+            factors: &crate::utf16factors::Factors,
+        ) -> Option<(Self::Position, Self::Position)> {
+            let (start, end) =
+                factors.run(self.input, self.pos_to_offset(pos), self.pos_to_offset(at))?;
+            Some((Self::Position::new(start), Self::Position::new(end)))
+        }
+    };
+}
+
 #[cfg(all(feature = "utf16", feature = "std"))]
 buffer_pool!(UTF16_BUFFERS, Utf16Input);
 #[cfg(all(feature = "utf16", feature = "std"))]
@@ -992,6 +1119,11 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     pooled_buffers!(UTF16_BUFFERS, Utf16Input, 'a);
 
     #[inline(always)]
+    fn code_units(&self) -> &[u16] {
+        self.input
+    }
+
+    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Utf16Input<'a> {
         self.debug_assert_valid_pos(range.start);
         self.debug_assert_valid_pos(range.end);
@@ -1011,7 +1143,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         *pos += 1;
 
         // If the code unit is not a high surrogate, it is not the start of a surrogate pair.
-        if !Self::is_high_surrogate(u1) {
+        if !is_high_surrogate(u1) {
             return Some(u1.into());
         }
 
@@ -1020,12 +1152,12 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         };
 
         // If the code unit is not a low surrogate, it is not a surrogate pair.
-        if !Self::is_low_surrogate(u2) {
+        if !is_low_surrogate(u2) {
             return Some(u1.into());
         }
 
         *pos += 1;
-        Some(Self::code_point_from_surrogates(u1, u2))
+        Some(code_point_from_surrogates(u1, u2))
     }
 
     #[inline(always)]
@@ -1039,7 +1171,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         *pos -= 1;
 
         // If the code unit is not a low surrogate, it is not the end of a surrogate pair.
-        if *pos == left_end || !Self::is_low_surrogate(u2) {
+        if *pos == left_end || !is_low_surrogate(u2) {
             return Some(u2.into());
         }
 
@@ -1048,12 +1180,12 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         };
 
         // If the code unit is not a high surrogate, it is not a surrogate pair.
-        if !Self::is_high_surrogate(u1) {
+        if !is_high_surrogate(u1) {
             return Some(u2.into());
         }
 
         *pos -= 1;
-        Some(Self::code_point_from_surrogates(u1, u2))
+        Some(code_point_from_surrogates(u1, u2))
     }
 
     #[inline(always)]
@@ -1062,7 +1194,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         pos += 1;
 
         // If the code unit is not a high surrogate, it is not the start of a surrogate pair.
-        if !Self::is_high_surrogate(u1) {
+        if !is_high_surrogate(u1) {
             return Some(pos);
         }
 
@@ -1071,7 +1203,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         };
 
         // If the code unit is not a low surrogate, it is not a surrogate pair.
-        if !Self::is_low_surrogate(u2) {
+        if !is_low_surrogate(u2) {
             return Some(pos);
         }
 
@@ -1091,7 +1223,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         pos -= 1;
 
         // If the code unit is not a low surrogate, it is not the end of a surrogate pair.
-        if pos == left_end || !Self::is_low_surrogate(u2) {
+        if pos == left_end || !is_low_surrogate(u2) {
             return Some(pos);
         }
 
@@ -1100,7 +1232,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         };
 
         // If the code unit is not a high surrogate, it is not a surrogate pair.
-        if !Self::is_high_surrogate(u1) {
+        if !is_high_surrogate(u1) {
             return Some(pos);
         }
 
@@ -1166,43 +1298,34 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         panic!("Should never be finding bytes for utf16");
     }
 
-    #[inline(always)]
-    fn find_unit(
-        &self,
-        pos: Self::Position,
-        units: &crate::utf16prefilter::UnitSet,
-    ) -> Option<Self::Position> {
-        let from = self.pos_to_offset(pos);
-        let at = self.input[from..].iter().position(|&u| units.contains(u))?;
-        Some(Self::Position::new(from + at))
-    }
+    unit_searches!();
 
+    // Positions step over surrogate pairs, so a low surrogate right of a high one is no start,
+    // unless the search starts there.
     #[inline(always)]
     fn find_start_unit(
         &self,
         pos: Self::Position,
-        units: &crate::utf16prefilter::UnitSet,
-        second: Option<&crate::utf16prefilter::UnitSet>,
+        limit: Self::Position,
+        prefilter: &crate::utf16prefilter::Utf16Prefilter,
+        scan: &mut crate::utf16prefilter::UnitScan,
     ) -> Option<Self::Position> {
-        let mut i = self.pos_to_offset(pos);
-        while let Some(&u) = self.input.get(i) {
-            if units.contains(u)
-                && second.is_none_or(|second| {
-                    self.input
-                        .get(i + 1)
-                        .is_some_and(|&next| second.contains(next))
-                })
-            {
-                return Some(Self::Position::new(i));
-            }
-            let pair = Self::is_high_surrogate(u)
-                && self
+        let from = self.pos_to_offset(pos);
+        let limit = self.pos_to_offset(limit);
+        let mut at = from;
+        loop {
+            at = prefilter.find_start(self.input, at, limit, scan)?;
+            if at == from
+                || self
                     .input
-                    .get(i + 1)
-                    .is_some_and(|&u2| Self::is_low_surrogate(u2));
-            i += if pair { 2 } else { 1 };
+                    .get(at)
+                    .is_none_or(|&unit| !is_low_surrogate(unit))
+                || !is_high_surrogate(self.input[at - 1])
+            {
+                return Some(Self::Position::new(at));
+            }
+            at += 1;
         }
-        None
     }
 
     fn subrange_eq<Dir: Direction>(
@@ -1278,6 +1401,11 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
 
     #[cfg(feature = "std")]
     pooled_buffers!(UCS2_BUFFERS, Ucs2Input, 'a);
+
+    #[inline(always)]
+    fn code_units(&self) -> &[u16] {
+        self.input
+    }
 
     #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Ucs2Input<'a> {
@@ -1381,33 +1509,24 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
         panic!("Should never be finding bytes for ucs2");
     }
 
-    #[inline(always)]
-    fn find_unit(
-        &self,
-        pos: Self::Position,
-        units: &crate::utf16prefilter::UnitSet,
-    ) -> Option<Self::Position> {
-        let from = self.pos_to_offset(pos);
-        let at = self.input[from..].iter().position(|&u| units.contains(u))?;
-        Some(Self::Position::new(from + at))
-    }
+    unit_searches!();
 
     // Every unit is a character here, so a start is any unit in the set.
     #[inline(always)]
     fn find_start_unit(
         &self,
         pos: Self::Position,
-        units: &crate::utf16prefilter::UnitSet,
-        second: Option<&crate::utf16prefilter::UnitSet>,
+        limit: Self::Position,
+        prefilter: &crate::utf16prefilter::Utf16Prefilter,
+        scan: &mut crate::utf16prefilter::UnitScan,
     ) -> Option<Self::Position> {
-        let Some(second) = second else {
-            return self.find_unit(pos, units);
-        };
-        let from = self.pos_to_offset(pos);
-        let at = self.input[from..]
-            .windows(2)
-            .position(|pair| units.contains(pair[0]) && second.contains(pair[1]))?;
-        Some(Self::Position::new(from + at))
+        let at = prefilter.find_start(
+            self.input,
+            self.pos_to_offset(pos),
+            self.pos_to_offset(limit),
+            scan,
+        )?;
+        Some(Self::Position::new(at))
     }
 
     fn subrange_eq<Dir: Direction>(

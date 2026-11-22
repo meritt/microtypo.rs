@@ -1,2 +1,5 @@
 [alias]
 xtask = "run --package xtask --locked --quiet --"
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

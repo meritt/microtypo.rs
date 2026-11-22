@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const [entry, corpusArg] = process.argv.slice(2);
@@ -13,7 +13,7 @@ if (!entry) {
 const corpusPath =
   corpusArg ??
   process.env.MICROTYPO_CORPUS ??
-  fileURLToPath(new URL('../../../testdata/conformance/corpus.jsonl', import.meta.url));
+  join(import.meta.dirname, '../../../testdata/conformance/corpus.jsonl');
 const { load } = await import(pathToFileURL(resolve(entry)).href);
 const { MicroTypo } = await load();
 

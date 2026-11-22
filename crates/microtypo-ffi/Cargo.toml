@@ -21,6 +21,7 @@ default = ["mimalloc"]
 mimalloc = ["dep:mimalloc"]
 
 [dependencies]
+getrandom.workspace = true
 microtypo-core.workspace = true
 mimalloc = { version = "0.1.52", default-features = false, optional = true }
 serde_json.workspace = true

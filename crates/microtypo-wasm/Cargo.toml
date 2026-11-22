@@ -17,7 +17,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 microtypo-core.workspace = true
-serde_json.workspace = true
 wasm-bindgen.workspace = true
 js-sys.workspace = true
 getrandom = { workspace = true, features = ["wasm_js"] }

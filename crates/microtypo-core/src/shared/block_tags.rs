@@ -58,3 +58,6 @@ pub fn implied_end_tags(name: &str) -> Option<&'static [&'static str]> {
         _ => None,
     }
 }
+
+pub const DEFAULT_SAFE_TAGS: [&str; 10] =
+    ["pre", "code", "script", "style", "kbd", "samp", "var", "tt", "textarea", "math"];

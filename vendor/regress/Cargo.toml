@@ -35,6 +35,7 @@ alloc = [
     "memchr/alloc",
 ]
 backend-pikevm = []
+codegen = ["utf16"]
 default = [
     "backend-pikevm",
     "std",
@@ -68,6 +69,14 @@ path = "tests/pcre_tests.rs"
 [[test]]
 name = "replacement_tests"
 path = "tests/replacement_tests.rs"
+
+[[test]]
+name = "end_of_input_start"
+path = "tests/end_of_input_start.rs"
+
+[[test]]
+name = "sticky_attempt"
+path = "tests/sticky_attempt.rs"
 
 [[test]]
 name = "syntax_error_tests"

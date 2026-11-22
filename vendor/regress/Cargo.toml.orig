@@ -35,6 +35,9 @@ prohibit-unsafe = []
 # Enables UTF-16 support. This disables some optimizations, so it should only be used when necessary.
 utf16 = []
 
+# Enables generating Rust matchers from regexes ahead of time, for UTF-16 and UCS-2 input.
+codegen = ["utf16"]
+
 # Enables Pattern trait implementation for str::find, str::contains, etc.
 pattern = []
 

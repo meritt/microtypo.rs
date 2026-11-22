@@ -167,10 +167,16 @@ pub use crate::api::*;
 #[macro_use]
 mod util;
 
+#[cfg(feature = "utf16")]
+#[doc(hidden)]
+pub mod aot;
 mod api;
 mod bytesearch;
 mod charclasses;
 mod classicalbacktrack;
+#[cfg(feature = "codegen")]
+#[doc(hidden)]
+pub mod codegen;
 mod codepointset;
 mod cursor;
 mod emit;
@@ -193,6 +199,8 @@ mod startpredicate;
 mod types;
 mod unicode;
 mod unicodetables;
+#[cfg(feature = "utf16")]
+mod utf16factors;
 #[cfg(feature = "utf16")]
 mod utf16prefilter;
 

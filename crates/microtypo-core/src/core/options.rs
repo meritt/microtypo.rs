@@ -6,22 +6,23 @@ use crate::js::{self, Re};
 const MAX_SELECTOR_LEN: usize = 64;
 const MAX_SELECTOR_STARS: usize = 4;
 
-pub fn wildcard_to_regex(pattern: &str) -> Result<Re> {
-    if pattern.encode_utf16().count() > MAX_SELECTOR_LEN {
+pub fn wildcard_to_regex_units(pattern: &[u16]) -> Result<Re> {
+    let display = js::lossy(pattern);
+    if pattern.len() > MAX_SELECTOR_LEN {
         return Err(Error::config(
             format!("selector too long (max {MAX_SELECTOR_LEN})"),
-            json!({ "selector": pattern }),
+            json!({ "selector": display }),
         ));
     }
-    let parts: Vec<&str> = pattern.split('*').collect();
+    let parts: Vec<&[u16]> = pattern.split(|&c| c == 0x2a).collect();
     if parts.len() - 1 > MAX_SELECTOR_STARS {
         return Err(Error::config(
             format!("selector has too many '*' (max {MAX_SELECTOR_STARS})"),
-            json!({ "selector": pattern }),
+            json!({ "selector": display }),
         ));
     }
-    let body = parts.iter().map(|p| js::regex::escape_str(p)).collect::<Vec<_>>().join("[a-z0-9_-]*");
-    Ok(Re::new(&format!("^{body}$"), "i"))
+    let body = js::join(&parts.iter().map(|p| js::u(&js::escape(p))).collect::<Vec<_>>(), &js::u("[a-z0-9_-]*"));
+    Ok(Re::try_new_utf16(&[js::u("^"), body, js::u("$")].concat(), "i").expect("escaped selector"))
 }
 
 pub fn canonical_group_name(name: &str) -> String {
@@ -44,29 +45,16 @@ pub fn is_on(value: &Value) -> bool {
     }
 }
 
-pub fn is_off(value: &Value) -> bool {
-    match value {
-        Value::Bool(b) => !*b,
-        Value::Number(_) => number_is(value, 0.0),
-        Value::Null => true,
-        Value::String(s) => {
-            let v = canonical_group_name(s);
-            v == "off" || v == "0" || v == "false" || v.is_empty()
-        }
-        _ => false,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Override {
-    pub group: String,
-    pub selector: String,
+    pub group: js::JsString,
+    pub selector: js::JsString,
     pub value: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Setting {
-    pub group: String,
+    pub group: js::JsString,
     pub key: String,
     pub value: Value,
 }
@@ -89,16 +77,18 @@ impl Intent {
 
 const ENGINE_KEYS: [&str; 4] = ["entities", "html", "maxInputLength", "maxProcessingMs"];
 
-pub fn normalise_options(input: &Map<String, Value>) -> Intent {
+pub fn normalise_options(
+    input: &Map<String, Value>,
+    groups: &[js::JsString],
+    rules: &[(js::JsString, Value)],
+) -> Intent {
     let mut out = Intent::default();
     for key in ENGINE_KEYS {
         if let Some(v) = input.get(key) {
             out.set_engine(key, v.clone());
         }
     }
-    if let Some(rules) = input.get("rules") {
-        apply_rules(rules, &mut out);
-    }
+    apply_rules(rules, &mut out, groups);
     if let Some(render) = input.get("render") {
         apply_render(render, &mut out);
     }
@@ -106,7 +96,7 @@ pub fn normalise_options(input: &Map<String, Value>) -> Intent {
 }
 
 fn push_override(out: &mut Intent, group: &str, selector: &str, value: bool) {
-    out.overrides.push(Override { group: canonical_group_name(group), selector: selector.to_owned(), value });
+    out.overrides.push(Override { group: js::to_lower(&js::u(group)), selector: js::u(selector), value });
 }
 
 fn apply_render(opts: &Value, out: &mut Intent) {
@@ -167,30 +157,33 @@ fn push_dotted(out: &mut Intent, key: &str, value: bool) {
     push_override(out, &key[..dot], &key[dot + 1..], value);
 }
 
-fn apply_rules(rules: &Value, out: &mut Intent) {
-    let Some(rules) = rules.as_object() else { return };
+fn apply_rules(rules: &[(js::JsString, Value)], out: &mut Intent, groups: &[js::JsString]) {
     for (key, value) in rules {
-        if let Some((_, bundle)) = BUNDLES.iter().find(|(n, _)| n == key) {
+        if let Some((_, bundle)) = BUNDLES.iter().find(|(n, _)| js::u(n) == *key) {
             for o in *bundle {
                 push_dotted(out, o, is_on(value));
             }
             continue;
         }
-        if SETTING_SELECTORS.contains(&key.as_str()) {
-            let name = if key == "quote.nested" { "allowNested" } else { "convertInches" };
+        if SETTING_SELECTORS.iter().any(|s| js::u(s) == *key) {
+            let name = if *key == js::u("quote.nested") { "allowNested" } else { "convertInches" };
             out.settings.push(Setting {
-                group: "quote".to_owned(),
+                group: js::u("quote"),
                 key: name.to_owned(),
                 value: Value::Bool(is_on(value)),
             });
             continue;
         }
-        if key.contains('.') {
-            push_dotted(out, key, is_on(value));
+        if let Some(dot) = key.iter().position(|&c| c == 0x2e) {
+            out.overrides.push(Override {
+                group: js::to_lower(&key[..dot]),
+                selector: key[dot + 1..].to_vec(),
+                value: is_on(value),
+            });
             continue;
         }
-        if KNOWN_GROUPS.contains(&canonical_group_name(key).as_str()) {
-            push_override(out, key, "*", is_on(value));
+        if groups.contains(&js::to_lower(key)) {
+            out.overrides.push(Override { group: js::to_lower(key), selector: js::u("*"), value: is_on(value) });
         }
     }
 }

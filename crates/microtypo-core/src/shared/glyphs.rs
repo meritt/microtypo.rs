@@ -1,6 +1,6 @@
+use crate::js::JsString;
+use crate::js::Re;
 use std::sync::LazyLock;
-
-use crate::js::{JsString, Re, escape};
 
 pub const NBSP: char = '\u{00A0}';
 pub const NNBSP: char = '\u{202F}';
@@ -12,6 +12,7 @@ pub const LDQUO: char = '“';
 pub const LSQUO: char = '‘';
 pub const RSQUO: char = '’';
 pub const PRIME: char = '″';
+pub const SINGLE_PRIME: char = '′';
 pub const MDASH: char = '—';
 pub const NDASH: char = '–';
 pub const MINUS: char = '−';
@@ -39,6 +40,44 @@ pub const FRAC12: char = '½';
 pub const FRAC14: char = '¼';
 pub const FRAC34: char = '¾';
 pub const COMBINING_ACUTE: char = '\u{0301}';
+
+pub const EXTENDED_FRACTION_GLYPHS: &[u16] = &[0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E];
+pub static FRACTION_GLYPHS: LazyLock<String> =
+    LazyLock::new(|| format!("{FRAC12}{FRAC14}{FRAC34}{}", crate::js::lossy(EXTENDED_FRACTION_GLYPHS)));
+pub const OPTIONAL_GLYPH_RULES: &[(&str, &str, &[u16])] = &[
+    ("number", "fraction_extended", EXTENDED_FRACTION_GLYPHS),
+    ("number", "minus", EXTENDED_FRACTION_GLYPHS),
+    ("number", "prime", &[0x2032]),
+    ("symbol", "arrows_extended", &[0x2194, 0x21D2, 0x21D4]),
+];
+
+pub fn decode_optional_glyphs(text: &[u16], selected: &[u16], xml: bool) -> JsString {
+    static REFERENCE: LazyLock<Re> = LazyLock::new(|| Re::new(r"&#(?:[xX]([0-9A-Fa-f]+)|([0-9]+));", "gu"));
+    static XML_REFERENCE: LazyLock<Re> =
+        LazyLock::new(|| Re::new(r"&#(?:[xX]([0-9A-Fa-f]+)|([0-9]+))\u{e000}N\d{1,9}\u{e001};", "gu"));
+    let reference = if xml { &XML_REFERENCE } else { &REFERENCE };
+    reference.replace_with(text, |m| {
+        let (digits, radix) = if m.has(1) { (m.s(1), 16) } else { (m.s(2), 10) };
+        match u16::from_str_radix(&crate::js::lossy(digits), radix) {
+            Ok(value) if selected.contains(&value) => vec![value],
+            _ => m.whole().to_vec(),
+        }
+    })
+}
+
+pub fn encode_optional_glyphs(text: &[u16], selected: &[u16]) -> JsString {
+    let mut out = Vec::with_capacity(text.len());
+    for &g in text {
+        if selected.contains(&g) {
+            out.extend_from_slice(&[u16::from(b'&'), u16::from(b'#')]);
+            push_decimal(g, &mut out);
+            out.push(u16::from(b';'));
+        } else {
+            out.push(g);
+        }
+    }
+    out
+}
 
 pub const fn unit(c: char) -> u16 {
     c as u32 as u16
@@ -84,25 +123,54 @@ pub const GLYPH_TO_ENTITY: &[(char, &str)] = &[
     (COMBINING_ACUTE, "&#769;"),
 ];
 
-static GLYPH_RE: LazyLock<Re> = LazyLock::new(|| {
-    let body: String = GLYPH_TO_ENTITY.iter().map(|(g, _)| escape(&crate::js::u(&g.to_string()))).collect();
-    Re::new(&format!("[{body}]"), "gu")
-});
+const LAST_GLYPH: u16 = {
+    let mut last = 0;
+    let mut i = 0;
+    while i < GLYPH_TO_ENTITY.len() {
+        if unit(GLYPH_TO_ENTITY[i].0) > last {
+            last = unit(GLYPH_TO_ENTITY[i].0);
+        }
+        i += 1;
+    }
+    last
+};
 
 fn entity_for(g: u16) -> Option<&'static str> {
-    GLYPH_TO_ENTITY.iter().find(|(c, _)| unit(*c) == g).map(|(_, e)| *e)
+    if !(0xA0..=LAST_GLYPH).contains(&g) || (0x100..0x2000).contains(&g) && g != unit(COMBINING_ACUTE) {
+        return None;
+    }
+    GLYPH_TO_ENTITY.iter().find(|&&(c, _)| unit(c) == g).map(|&(_, e)| e)
+}
+
+fn replace_glyphs(text: &[u16], write: impl Fn(u16, &'static str, &mut JsString)) -> JsString {
+    let mut out = Vec::with_capacity(text.len());
+    let mut copied = 0;
+    for (i, &g) in text.iter().enumerate() {
+        if let Some(entity) = entity_for(g) {
+            out.extend_from_slice(&text[copied..i]);
+            write(g, entity, &mut out);
+            copied = i + 1;
+        }
+    }
+    out.extend_from_slice(&text[copied..]);
+    out
 }
 
 pub fn unicode_to_entities(text: &[u16]) -> JsString {
-    GLYPH_RE.replace_with(text, |c| {
-        let g = c.whole()[0];
-        entity_for(g).map_or_else(|| c.whole().to_vec(), crate::js::u)
-    })
+    replace_glyphs(text, |_, entity, out| out.extend(entity.bytes().map(u16::from)))
+}
+
+fn push_decimal(n: u16, out: &mut JsString) {
+    if n >= 10 {
+        push_decimal(n / 10, out);
+    }
+    out.push(u16::from(b'0') + n % 10);
 }
 
 pub fn unicode_to_xml_entities(text: &[u16]) -> JsString {
-    GLYPH_RE.replace_with(text, |c| {
-        let g = c.whole()[0];
-        if entity_for(g).is_some() { crate::js::u(&format!("&#{g};")) } else { c.whole().to_vec() }
+    replace_glyphs(text, |g, _, out| {
+        out.extend_from_slice(&[u16::from(b'&'), u16::from(b'#')]);
+        push_decimal(g, out);
+        out.push(u16::from(b';'));
     })
 }

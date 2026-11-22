@@ -1,4 +1,6 @@
-use std::fmt::Display;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{Display, Write as _};
+use std::hash::{BuildHasher, RandomState};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -7,8 +9,16 @@ use std::{env, fs};
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | dist [<dir>] \
-                     | pin [--check] [<dir>] | corpus [--check] [<src>]";
+const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | swift-test | dist [<dir>] \
+                     | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check] \
+                     | parity [<src>] [--ref REV] | cli [<src>] [--ref REV] \
+                     | fuzz <src> [--cases N] [--seed S] [--jobs N] [--ref REV] [--keep-going | --coverage] [--reuse] \
+                     | bench [<src>] [--json] [--ref REV] | bench --compare <a.json> <b.json> [--threshold PCT]";
+
+const REFERENCE_FILES: [&str; 5] =
+    ["package.json", "src", "test/conformance/corpus.jsonl", "test/conformance/replay.mjs", "test/fixtures"];
+
+const BENCH_LENGTHS: [usize; 3] = [300, 3_000, 28_000];
 
 const RELEASES: &str = "https://github.com/meritt/microtypo.rs/releases/download";
 
@@ -16,19 +26,24 @@ const BINARYEN: &str = "133";
 
 const WASM_OPT_FLAGS: [&str; 3] = ["-Os", "--strip-debug", "--strip-producers"];
 
-const WASM_GZIP_BUDGET: u64 = 430_000;
+const WASM_GZIP_BUDGET: u64 = 800_000;
 
 const CORPUS_SOURCE: &str = "test/conformance/corpus.jsonl";
 const CORPUS: &str = "corpus.jsonl";
 const CORPUS_PIN: &str = "testdata/conformance/corpus.sha256";
 
-const GLUE_MARKER: &str = "/* @glue */";
+const MATCHERS: &str = "crates/microtypo-core/src/js/regex/matchers.rs";
 
-const MACOS: &str = "26.0";
+const MATCHER_SOURCE_LIMIT: usize = 5_000;
+
+const MATCHERS_LINTS: &str =
+    "#![allow(clippy::all, clippy::pedantic, unused_labels, unused_mut, unused_variables, unreachable_code)]";
+
+const MACOS: &str = "27.0";
 
 const SOURCE_DATE_EPOCH: &str = "315532800";
 
-const APPLE_TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+const APPLE_TARGET: &str = "aarch64-apple-darwin";
 
 type Result<T = ()> = std::result::Result<T, String>;
 
@@ -40,6 +55,7 @@ fn main() -> ExitCode {
         ["header", "--check"] => header(true),
         ["wasm"] => wasm().map(drop),
         ["xcframework"] => xcframework().map(drop),
+        ["swift-test"] => swift_test(),
         ["dist"] => dist(None),
         ["dist", dir] => dist(Some(Path::new(dir))),
         ["pin"] => pin(false, None),
@@ -50,6 +66,12 @@ fn main() -> ExitCode {
         ["corpus", "--check"] => corpus(true, None),
         ["corpus", "--check", src] => corpus(true, Some(Path::new(src))),
         ["corpus", src] => corpus(false, Some(Path::new(src))),
+        ["matchers"] => matchers(false),
+        ["matchers", "--check"] => matchers(true),
+        ["parity", rest @ ..] => parity(rest),
+        ["cli", rest @ ..] => cli(rest),
+        ["fuzz", rest @ ..] => fuzz(rest),
+        ["bench", rest @ ..] => bench(rest),
         _ => Err(USAGE.to_owned()),
     };
     match result {
@@ -118,11 +140,11 @@ fn wasm() -> Result<PathBuf> {
         "--target",
         "wasm32-unknown-unknown",
     ]))?;
-    let module = root.join("target/wasm32-unknown-unknown/wasm/microtypo_wasm.wasm");
+    let module = target_dir().join("wasm32-unknown-unknown/wasm/microtypo_wasm.wasm");
     let bindgen_out = root.join("target/staging/bindgen");
     fresh_dir(&bindgen_out)?;
     run(Command::new(&bindgen)
-        .args(["--target", "no-modules", "--no-typescript", "--out-dir"])
+        .args(["--target", "web", "--no-typescript", "--out-dir"])
         .arg(&bindgen_out)
         .arg(&module))?;
 
@@ -136,16 +158,16 @@ fn wasm() -> Result<PathBuf> {
 
     let glue = bindgen_out.join("microtypo_wasm.js");
     let glue = fs::read_to_string(&glue).map_err(at(glue.display()))?;
-    if !glue.starts_with("let wasm_bindgen = ") {
-        return Err("the wasm-bindgen glue does not start with `let wasm_bindgen = `".to_owned());
+    if glue.matches("'microtypo_wasm_bg.wasm'").count() != 1 {
+        return Err("the wasm-bindgen glue needs one 'microtypo_wasm_bg.wasm'".to_owned());
     }
+    write(&dist.join("glue.js"), &glue.replace("'microtypo_wasm_bg.wasm'", "'microtypo.wasm'"))?;
     let template = root.join("packages/npm/src/microtypo.js");
     let text = fs::read_to_string(&template).map_err(at(template.display()))?;
-    if text.matches(GLUE_MARKER).count() != 1 || text.matches("'@VERSION@'").count() != 1 {
-        return Err(format!("{} needs one {GLUE_MARKER} and one '@VERSION@'", template.display()));
+    if text.matches("'@VERSION@'").count() != 1 {
+        return Err(format!("{} needs one '@VERSION@'", template.display()));
     }
-    let text = text.replace(GLUE_MARKER, glue.trim_end()).replace("'@VERSION@'", &format!("'{version}'"));
-    write(&dist.join("microtypo.js"), &text)?;
+    write(&dist.join("microtypo.js"), &text.replace("'@VERSION@'", &format!("'{version}'")))?;
     copy(&root.join("LICENSE"), &dist.join("LICENSE"))?;
     copy(&manifest, &dist.join("package.json"))?;
     Ok(dist)
@@ -167,6 +189,9 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
             return Err(format!("{} has uncommitted changes: pin a committed corpus", source.display()));
         }
         let commit = git(&["log", "-1", "--format=%H", "--", CORPUS_SOURCE])?;
+        if let Err(error) = check_parity(&source, Some(&commit)) {
+            eprintln!("xtask: {error}; port the rules before replaying the corpus");
+        }
         copy(&source.join(CORPUS_SOURCE), &copy_path)?;
         let pin = format!("commit {commit}\n{}  {CORPUS}\n", sha256(&copy_path)?);
         write(&pin_path, &pin)?;
@@ -174,21 +199,8 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
         return Ok(());
     }
 
-    let pin = fs::read_to_string(&pin_path).map_err(at(pin_path.display()))?;
-    let mut commit = None;
-    let mut sha = None;
-    for line in pin.lines().filter(|l| !l.is_empty()) {
-        if let Some(c) = line.strip_prefix("commit ") {
-            commit = Some(c);
-        } else if let Some(s) = line.strip_suffix(&format!("  {CORPUS}")) {
-            sha = Some(s);
-        } else {
-            return Err(format!("{CORPUS_PIN}: unexpected line {line:?}"));
-        }
-    }
-    let (Some(commit), Some(sha)) = (commit, sha) else {
-        return Err(format!("{CORPUS_PIN} needs a commit and the SHA-256 of {CORPUS}"));
-    };
+    let (commit, sha) = corpus_pin()?;
+    let commit = commit.as_str();
     if sha256(&copy_path)? != sha {
         return Err(format!("testdata/conformance/{CORPUS} differs from {CORPUS_PIN}: run `cargo xtask corpus`"));
     }
@@ -212,22 +224,721 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
     Ok(())
 }
 
+fn corpus_pin() -> Result<(String, String)> {
+    let pin_path = root().join(CORPUS_PIN);
+    let pin = fs::read_to_string(&pin_path).map_err(at(pin_path.display()))?;
+    let mut commit = None;
+    let mut sha = None;
+    for line in pin.lines().filter(|l| !l.is_empty()) {
+        if let Some(c) = line.strip_prefix("commit ") {
+            commit = Some(c.to_owned());
+        } else if let Some(s) = line.strip_suffix(&format!("  {CORPUS}")) {
+            sha = Some(s.to_owned());
+        } else {
+            return Err(format!("{CORPUS_PIN}: unexpected line {line:?}"));
+        }
+    }
+    commit.zip(sha).ok_or_else(|| format!("{CORPUS_PIN} needs a commit and the SHA-256 of {CORPUS}"))
+}
+
+fn matchers(check: bool) -> Result {
+    let path = root().join(MATCHERS);
+    if check {
+        return generate_matchers(&path, true);
+    }
+    let previous = fs::read(&path).ok();
+    write(&path, matchers_file(&[], &[], &[], "")?.as_bytes())?;
+    let generated = std::panic::catch_unwind(|| generate_matchers(&path, false))
+        .unwrap_or_else(|_| Err("the matcher generator panicked".to_owned()));
+    if generated.is_err()
+        && let Some(previous) = previous
+    {
+        write(&path, &previous)?;
+    }
+    generated
+}
+
+fn generate_matchers(path: &Path, check: bool) -> Result {
+    let root = root();
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    let corpus_path = root.join("testdata/conformance").join(CORPUS);
+    let corpus = fs::File::open(&corpus_path).map_err(at(corpus_path.display()))?;
+    let listing = capture(Command::new(conformance()).arg("--patterns").stdin(corpus))?;
+    let mut patterns = Vec::new();
+    for line in listing.lines() {
+        let pattern: Value = serde_json::from_str(line).map_err(at(line))?;
+        match (pattern[0].as_str(), pattern[1].as_str()) {
+            (Some(source), Some(flags)) => patterns.push((source.to_owned(), flags.to_owned())),
+            _ => return Err(format!("microtypo-conformance --patterns printed {line}")),
+        }
+    }
+    patterns.sort();
+
+    let mut codegen = regress::codegen::Codegen::new();
+    let (mut generated, mut interpreted, mut code) = (Vec::new(), Vec::new(), String::new());
+    let mut factor_data = vec![0u8];
+    let mut factor_bytes_at: HashMap<Vec<u8>, u32> = HashMap::new();
+    let mut attempts: HashMap<(String, String), (u32, std::result::Result<String, String>)> = HashMap::new();
+    let mut functions = 0;
+    for (source, flags) in patterns {
+        let attempt = (source.clone(), flags.replace(['g', 'y'], ""));
+        if !attempts.contains_key(&attempt) {
+            let units: Vec<u16> = source.encode_utf16().collect();
+            let regex =
+                regress::Regex::from_utf16_with(&units, flags.as_str(), regress::FactorSource::Analyze(usize::MAX))
+                    .map_err(at(format!("/{source}/{flags}")))?;
+            let factors = match regress::codegen::Codegen::factors(&regex) {
+                Some(bytes) => {
+                    let fresh = u32::try_from(factor_data.len()).map_err(|e| e.to_string())?;
+                    *factor_bytes_at.entry(bytes).or_insert_with_key(|bytes| {
+                        factor_data.extend_from_slice(bytes);
+                        fresh
+                    })
+                }
+                None => 0,
+            };
+            let name = format!("m{functions}");
+            let shared = codegen.clone();
+            let outcome = match codegen.matcher(&regex, &name, flags.contains('u') || flags.contains('v')) {
+                Ok(matcher) if matcher.len() > MATCHER_SOURCE_LIMIT => {
+                    codegen = shared;
+                    Err(format!("{} bytes of source, over {MATCHER_SOURCE_LIMIT}", matcher.len()))
+                }
+                Ok(matcher) => {
+                    code.push_str(&matcher);
+                    functions += 1;
+                    Ok(name)
+                }
+                Err(reason) => {
+                    codegen = shared;
+                    Err(reason)
+                }
+            };
+            attempts.insert(attempt.clone(), (factors, outcome));
+        }
+        match &attempts[&attempt] {
+            (factors, Ok(name)) => generated.push((source, flags, name.clone(), *factors)),
+            (factors, Err(reason)) => interpreted.push((source, flags, reason.clone(), *factors)),
+        }
+    }
+    code.push_str(&codegen.classes());
+    let fresh = matchers_file(&generated, &interpreted, &factor_data, &code)?;
+    if check {
+        if fs::read_to_string(path).map_err(at(path.display()))? != fresh {
+            return Err(format!("{MATCHERS} is stale: run `cargo xtask matchers`"));
+        }
+    } else {
+        write(path, &fresh)?;
+    }
+    println!("{MATCHERS}: {} generated, {} interpreted", generated.len(), interpreted.len());
+    for (source, flags, reason, _) in &interpreted {
+        println!("  /{source}/{flags}: {reason}");
+    }
+    Ok(())
+}
+
+fn matchers_file(
+    generated: &[(String, String, String, u32)],
+    interpreted: &[(String, String, String, u32)],
+    factor_data: &[u8],
+    code: &str,
+) -> Result<String> {
+    let mut text = format!(
+        "{MATCHERS_LINTS}\n\nuse regress::aot;\n\npub(super) static MATCHERS: &[(&str, &str, aot::Attempt, u32)] = &[\n"
+    );
+    text.extend(generated.iter().map(|(source, flags, name, at)| format!("({source:?}, {flags:?}, {name}, {at}),\n")));
+    text.push_str("];\n\npub(super) static INTERPRETED: &[(&str, &str, &str)] = &[\n");
+    text.extend(interpreted.iter().map(|(source, flags, reason, _)| format!("({source:?}, {flags:?}, {reason:?}),\n")));
+    text.push_str("];\n\npub(super) static INTERPRETED_FACTORS: &[(&str, &str, u32)] = &[\n");
+    text.extend(interpreted.iter().map(|(source, flags, _, at)| format!("({source:?}, {flags:?}, {at}),\n")));
+    text.push_str("];\n\n");
+    let bytes: Vec<String> = factor_data.iter().map(u8::to_string).collect();
+    let _ = writeln!(text, "pub(super) static FACTOR_DATA: &[u8] = &[{}];\n", bytes.join(", "));
+    text.push_str(code);
+    let mut command = Command::new(tool("RUSTFMT", None, "rustfmt"));
+    command.args(["--edition", "2024", "--emit", "stdout"]).current_dir(root());
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().map_err(at(show(&command)))?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
+    let output = child.wait_with_output().map_err(at(show(&command)))?;
+    writer.join().expect("writer finished").map_err(at(show(&command)))?;
+    if !output.status.success() {
+        return Err(format!("{} failed: {}", show(&command), output.status));
+    }
+    String::from_utf8(output.stdout).map_err(at(show(&command)))
+}
+
+fn target_dir() -> PathBuf {
+    env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), |dir| root().join(dir))
+}
+
+fn conformance() -> PathBuf {
+    target_dir().join("release/microtypo-conformance")
+}
+
+struct Reference {
+    dir: PathBuf,
+    commit: String,
+}
+
+impl Drop for Reference {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.dir));
+    }
+}
+
+fn reference(repo: &Path, rev: Option<&str>) -> Result<Reference> {
+    let rev = match rev {
+        Some(rev) => rev.to_owned(),
+        None => corpus_pin()?.0,
+    };
+    let git = || {
+        let mut command = Command::new("git");
+        command.current_dir(repo);
+        command
+    };
+    let commit = capture(git().args(["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]))
+        .map_err(|_| format!("{} has no commit {rev}", repo.display()))?;
+    let dir = target_dir().join("reference").join(format!("{}-{}", &commit[..12], std::process::id()));
+    fresh_dir(&dir)?;
+    let reference = Reference { dir, commit };
+    let files =
+        capture(git().args(["ls-tree", "-r", "-z", "--name-only", &reference.commit, "--"]).args(REFERENCE_FILES))?;
+    for path in files.split('\0').filter(|p| !p.is_empty()) {
+        let mut command = git();
+        command.args(["show", &format!("{}:{path}", reference.commit)]);
+        let output = command.stderr(Stdio::inherit()).output().map_err(at(show(&command)))?;
+        if !output.status.success() {
+            return Err(format!("{} failed: {}", show(&command), output.status));
+        }
+        write(&reference.dir.join(path), &output.stdout)?;
+    }
+    for file in REFERENCE_FILES {
+        if !reference.dir.join(file).exists() {
+            return Err(format!("{} has no {file} at {}", repo.display(), reference.commit));
+        }
+    }
+    Ok(reference)
+}
+
+fn parity(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref"], &[])?;
+    check_parity(&repo(&positional)?, named.get("--ref").copied())
+}
+
+fn repo(positional: &[&str]) -> Result<PathBuf> {
+    match positional {
+        [] => Ok(root().join("../microtypo")),
+        [repo] => Ok(PathBuf::from(repo)),
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+fn check_parity(repo: &Path, rev: Option<&str>) -> Result {
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    let registry = capture(Command::new(conformance()).arg("--registry"))?;
+    let rust = target_dir().join("parity/rust.json");
+    write(&rust, &registry)?;
+    let reference = reference(repo, rev)?;
+    let mut command = Command::new("node");
+    command
+        .arg(root().join("xtask/parity/parity.mjs"))
+        .arg("--ref-dir")
+        .arg(&reference.dir)
+        .arg("--rust")
+        .arg(&rust)
+        .args(["--rev", &reference.commit])
+        .arg("--cache")
+        .arg(target_dir().join("parity"));
+    let status = command.status().map_err(at(show(&command)))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the rules or expressions of the core differ from the reference at {}", reference.commit))
+    }
+}
+
+struct Run {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: Option<i32>,
+    tree: Vec<String>,
+}
+
+fn cli(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref"], &[])?;
+    let repo = repo(&positional)?;
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-cli"]))?;
+    let reference = reference(&repo, named.get("--ref").copied())?;
+    let spec_path = root().join("xtask/cli/cases.json");
+    let spec: Value = serde_json::from_str(&fs::read_to_string(&spec_path).map_err(at(spec_path.display()))?)
+        .map_err(at(spec_path.display()))?;
+    let work = target_dir().join("cli").join(std::process::id().to_string());
+    fresh_dir(&work)?;
+    write(&work.join("outside.txt"), spec["outside"].as_str().unwrap_or_default())?;
+    let tree = work.join("tree");
+    let rust = target_dir().join("release/microtypo");
+    let node_cli = reference.dir.join("src/cli/index.js");
+    let empty = Vec::new();
+    let cases = spec["cases"].as_array().unwrap_or(&empty);
+    let (mut identical, mut listed, mut differences) = (0, 0, 0);
+    for case in cases {
+        let args: Vec<&str> = case["args"].as_array().unwrap_or(&empty).iter().filter_map(Value::as_str).collect();
+        let times = case["repeat"].as_u64().unwrap_or(1) as usize;
+        let stdin = match (case["stdin"].as_str(), case["stdinHex"].as_str()) {
+            (Some(text), _) => text.repeat(times).into_bytes(),
+            (None, Some(hex)) => bytes_of(hex)?,
+            (None, None) => Vec::new(),
+        };
+        let mut sides = Vec::new();
+        for program in [&rust, &node_cli] {
+            fixture(&tree, &spec["fixture"], &case["files"])?;
+            let mut command = if program == &node_cli {
+                let mut command = Command::new("node");
+                command.arg(program);
+                command
+            } else {
+                Command::new(program)
+            };
+            command.args(&args).current_dir(&tree);
+            for name in ["FORCE_COLOR", "NO_COLOR", "NODE_DISABLE_COLORS"] {
+                command.env_remove(name);
+            }
+            if let Some(env) = case["env"].as_object() {
+                for (name, value) in env {
+                    if let Some(value) = value.as_str() {
+                        command.env(name, value);
+                    }
+                }
+            }
+            sides.push(invoke(&mut command, &stdin, &tree)?);
+        }
+        let shown = serde_json::to_string(&args).unwrap_or_default();
+        let (port, js) = (&sides[0], &sides[1]);
+        let same_stderr = if case["budgetStage"] == true {
+            without_budget_stage(&port.stderr) == without_budget_stage(&js.stderr)
+        } else {
+            port.stderr == js.stderr
+        };
+        let same = port.stdout == js.stdout && same_stderr && port.code == js.code && port.tree == js.tree;
+        match (same, case["listed"].as_str()) {
+            (true, None) => identical += 1,
+            (true, Some(_)) => {
+                differences += 1;
+                println!("{shown}: listed as different but identical");
+            }
+            (false, Some(_)) => listed += 1,
+            (false, None) => {
+                differences += 1;
+                println!("{shown}:");
+                let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+                for (what, a, b) in [
+                    ("stdout", text(&port.stdout), text(&js.stdout)),
+                    ("stderr", text(&port.stderr), text(&js.stderr)),
+                    ("exit", format!("{:?}", port.code), format!("{:?}", js.code)),
+                    ("files", port.tree.join("\n"), js.tree.join("\n")),
+                ] {
+                    if a != b {
+                        println!("  {what}\n    port: {a:?}\n    reference: {b:?}");
+                    }
+                }
+            }
+        }
+    }
+    unlock(&tree);
+    drop(fs::remove_dir_all(&work));
+    println!(
+        "FORCE_COLOR with NO_COLOR or NODE_DISABLE_COLORS is excluded: Node emits a warning containing its process ID"
+    );
+    println!(
+        "cli comparison with the reference at {}: {} invocations, {identical} identical, {listed} listed in xtask/cli/cases.json; {differences} differences",
+        reference.commit,
+        cases.len()
+    );
+    if differences == 0 { Ok(()) } else { Err("the CLI differs from the reference".to_owned()) }
+}
+
+fn without_budget_stage(stderr: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(stderr);
+    match text.split_once(" budget at ").and_then(|(head, rest)| Some((head, rest.split_once(" — ")?.1))) {
+        Some((head, tail)) => format!("{head} budget — {tail}").into_bytes(),
+        None => stderr.to_vec(),
+    }
+}
+
+fn bytes_of(hex: &str) -> Result<Vec<u8>> {
+    let digits: Vec<u8> = hex.bytes().filter(u8::is_ascii_hexdigit).collect();
+    digits
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap_or_default(), 16).map_err(at(hex)))
+        .collect()
+}
+
+fn unlock(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    drop(fs::set_permissions(dir, fs::Permissions::from_mode(0o755)));
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            drop(fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o755)));
+            unlock(&entry.path());
+        }
+    }
+}
+
+fn fixture(tree: &Path, base: &Value, extra: &Value) -> Result {
+    unlock(tree);
+    fresh_dir(tree)?;
+    let mut modes = Vec::new();
+    let none = serde_json::Map::new();
+    for (path, file) in base.as_object().unwrap_or(&none).iter().chain(extra.as_object().unwrap_or(&none)) {
+        let at_path = tree.join(path);
+        if let Some(target) = file["link"].as_str() {
+            std::os::unix::fs::symlink(target, &at_path).map_err(at(at_path.display()))?;
+        } else if file["dir"].as_bool() == Some(true) {
+            fs::create_dir_all(&at_path).map_err(at(at_path.display()))?;
+        } else if let Some(hex) = file["hex"].as_str() {
+            write(&at_path, &bytes_of(hex)?)?;
+        } else {
+            write(&at_path, file["text"].as_str().unwrap_or_default())?;
+        }
+        if let Some(mode) = file["mode"].as_u64() {
+            modes.push((at_path, mode as u32));
+        }
+    }
+    for (path, mode) in modes.into_iter().rev() {
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).map_err(at(path.display()))?;
+    }
+    Ok(())
+}
+
+fn snapshot(dir: &Path, prefix: &str, entries: &mut Vec<String>) {
+    let Ok(listing) = fs::read_dir(dir) else { return };
+    let mut paths: Vec<PathBuf> = listing.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    for path in paths {
+        let name = format!("{prefix}{}", path.file_name().unwrap_or_default().to_string_lossy());
+        let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+        let mode = meta.permissions().mode() & 0o777;
+        if meta.file_type().is_symlink() {
+            let target = fs::read_link(&path).unwrap_or_default();
+            entries.push(format!("{name} -> {}", target.display()));
+        } else if meta.is_dir() {
+            entries.push(format!("{name}/ {mode:o}"));
+            snapshot(&path, &format!("{name}/"), entries);
+        } else {
+            let content = fs::read(&path).map_or_default(|b| String::from_utf8_lossy(&b).into_owned());
+            entries.push(format!("{name} {mode:o} {content:?}"));
+        }
+    }
+}
+
+fn invoke(command: &mut Command, stdin: &[u8], tree: &Path) -> Result<Run> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(at(show(command)))?;
+    let mut input = child.stdin.take().expect("stdin is piped");
+    let stdin = stdin.to_vec();
+    let feeder = std::thread::spawn(move || drop(input.write_all(&stdin)));
+    let output = child.wait_with_output().map_err(at(show(command)))?;
+    drop(feeder.join());
+    let mut tree_entries = Vec::new();
+    snapshot(tree, "", &mut tree_entries);
+    Ok(Run { stdout: output.stdout, stderr: output.stderr, code: output.status.code(), tree: tree_entries })
+}
+
+fn fuzz(args: &[&str]) -> Result {
+    let (positional, named) =
+        options(args, &["--cases", "--seed", "--jobs", "--ref"], &["--keep-going", "--coverage", "--reuse"])?;
+    let [repo] = positional.as_slice() else { return Err(USAGE.to_owned()) };
+    let coverage = named.contains_key("--coverage");
+    if coverage && named.contains_key("--reuse") {
+        return Err("--reuse does not apply to --coverage".to_owned());
+    }
+    let number = |flag: &str, default: u64| -> Result<u64> {
+        named.get(flag).map_or(Ok(default), |v| v.parse().map_err(|e| format!("{flag} {v}: {e}")))
+    };
+    let cases = number("--cases", if coverage { 100_000 } else { 10_000 })?;
+    let seed = number("--seed", u64::from(RandomState::new().hash_one(std::process::id()) as u32))?;
+    let jobs = number("--jobs", std::thread::available_parallelism().map_or(1, |n| n.get() as u64))?;
+    if jobs == 0 || jobs > 1024 {
+        return Err("--jobs must be between 1 and 1024".to_owned());
+    }
+    if seed > u64::from(u32::MAX) {
+        return Err(format!("--seed {seed} is over {}", u32::MAX));
+    }
+
+    let root = root();
+    if !coverage {
+        run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    }
+    let reference = reference(Path::new(repo), named.get("--ref").copied())?;
+    let mut command = Command::new("node");
+    command
+        .arg(root.join("xtask/fuzz/fuzz.mjs"))
+        .arg("--ref-dir")
+        .arg(&reference.dir)
+        .arg("--replay")
+        .arg(conformance())
+        .args([
+            "--seed",
+            &seed.to_string(),
+            "--cases",
+            &cases.to_string(),
+            "--jobs",
+            &jobs.to_string(),
+            "--rev",
+            &reference.commit,
+        ])
+        .arg("--failures")
+        .arg(target_dir().join("fuzz-failures.jsonl"))
+        .arg("--unshrunk")
+        .arg(target_dir().join("fuzz-unshrunk.jsonl"))
+        .arg("--cache")
+        .arg(target_dir().join("fuzz"));
+    for flag in ["--keep-going", "--coverage", "--reuse"] {
+        if named.contains_key(flag) {
+            command.arg(flag);
+        }
+    }
+    run(&mut command)
+}
+
+fn bench(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref", "--threshold"], &["--json", "--compare"])?;
+    if named.contains_key("--compare") {
+        let [before, after] = positional.as_slice() else { return Err(USAGE.to_owned()) };
+        let threshold: f64 =
+            named.get("--threshold").map_or(Ok(10.0), |v| v.parse().map_err(|e| format!("--threshold {v}: {e}")))?;
+        return compare(Path::new(before), Path::new(after), threshold);
+    }
+    let repo = repo(&positional)?;
+
+    let root = root();
+    let reference = reference(&repo, named.get("--ref").copied())?;
+    let points = bench_points(&reference.dir)?;
+    let points_path = reference.dir.join("bench-points.json");
+    write(&points_path, &serde_json::to_string(&points).map_err(|e| e.to_string())?)?;
+
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-core", "--example", "profile"]))?;
+    let dist = wasm()?;
+    let rust = samples(Command::new(target_dir().join("release/examples/profile")).arg("bench").arg(&points_path))?;
+    let node = || {
+        let mut command = Command::new("node");
+        command.arg(root.join("xtask/bench/bench.mjs")).arg(&reference.dir).arg(&points_path);
+        command
+    };
+    let wasm_samples = samples(node().arg(dist.join("microtypo.js")))?;
+    let js = samples(&mut node())?;
+
+    let mut rows = Vec::new();
+    for point in &points {
+        let name = point["name"].as_str().unwrap_or_default();
+        let stats = |all: &serde_json::Map<String, Value>| -> Result<Value> {
+            let mut values: Vec<f64> = all
+                .get(name)
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("no samples for {name}"))?
+                .iter()
+                .filter_map(Value::as_f64)
+                .collect();
+            if values.is_empty() {
+                return Err(format!("no samples for {name}"));
+            }
+            values.sort_by(f64::total_cmp);
+            let rank = |q: f64| values[((q * values.len() as f64).ceil() as usize).clamp(1, values.len()) - 1];
+            Ok(json!({ "median_ms": rank(0.5), "p95_ms": rank(0.95), "samples": values.len() }))
+        };
+        let wasm_stats = if wasm_samples.contains_key(name) { stats(&wasm_samples)? } else { Value::Null };
+        rows.push(json!({ "name": name, "rust": stats(&rust)?, "wasm": wasm_stats, "js": stats(&js)? }));
+    }
+
+    if named.contains_key("--json") {
+        let (commit, dirty) = head()?;
+        let snapshot = json!({
+            "schema": 1,
+            "engine": version()?,
+            "commit": commit,
+            "dirty": dirty,
+            "reference": reference.commit,
+            "rustc": rustc()?,
+            "node": capture(Command::new("node").arg("--version"))?,
+            "points": rows,
+        });
+        println!("{}", serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+
+    let ms = |row: &Value, side: &str, key: &str| row[side][key].as_f64().unwrap_or(f64::NAN);
+    let cell = |value: f64, digits: usize| {
+        if value.is_nan() { "-".to_owned() } else { format!("{value:.digits$}") }
+    };
+    println!(
+        "{:<18} {:>11} {:>11} {:>11} {:>11} {:>11} {:>11} {:>8} {:>8}",
+        "point", "rust median", "rust p95", "wasm median", "wasm p95", "js median", "js p95", "rust/js", "wasm/js"
+    );
+    for row in &rows {
+        println!(
+            "{:<18} {:>11.4} {:>11.4} {:>11} {:>11} {:>11.4} {:>11.4} {:>8.2} {:>8}",
+            row["name"].as_str().unwrap_or_default(),
+            ms(row, "rust", "median_ms"),
+            ms(row, "rust", "p95_ms"),
+            cell(ms(row, "wasm", "median_ms"), 4),
+            cell(ms(row, "wasm", "p95_ms"), 4),
+            ms(row, "js", "median_ms"),
+            ms(row, "js", "p95_ms"),
+            ms(row, "rust", "median_ms") / ms(row, "js", "median_ms"),
+            cell(ms(row, "wasm", "median_ms") / ms(row, "js", "median_ms"), 2),
+        );
+    }
+    println!("milliseconds per call; reference {}", reference.commit);
+    Ok(())
+}
+
+fn bench_points(reference: &Path) -> Result<Vec<Value>> {
+    let big = reference.join("test/fixtures/big-text");
+    let mut files: Vec<PathBuf> = fs::read_dir(&big)
+        .map_err(at(big.display()))?
+        .map(|entry| entry.map(|e| e.path()).map_err(at(big.display())))
+        .collect::<Result<_>>()?;
+    files.retain(|path| path.to_string_lossy().ends_with(".input.txt"));
+    files.sort();
+    let prose = files
+        .iter()
+        .map(|path| fs::read_to_string(path).map_err(at(path.display())))
+        .collect::<Result<Vec<_>>>()?
+        .join("\n\n");
+    let prose: Vec<u16> = prose.encode_utf16().collect();
+    if prose.is_empty() {
+        return Err(format!("{} has no *.input.txt", big.display()));
+    }
+
+    let corpus = reference.join("test/fixtures/corpus.json");
+    let corpus: Value =
+        serde_json::from_slice(&fs::read(&corpus).map_err(at(corpus.display()))?).map_err(at(corpus.display()))?;
+    let short: Vec<Value> = corpus
+        .as_array()
+        .map_or_default(|cases| cases.iter().filter(|c| c["text"].is_string()).map(|c| c["text"].clone()).collect());
+
+    let mut points = Vec::new();
+    for (label, config) in [
+        ("default", Value::Null),
+        ("html", json!({ "html": true, "entities": true })),
+        ("markdown", json!({ "input": "markdown" })),
+    ] {
+        points.push(json!({ "name": format!("{label}/new"), "config": config, "op": "new" }));
+        points.push(json!({ "name": format!("{label}/short"), "config": config, "op": "process", "texts": short }));
+        for length in BENCH_LENGTHS {
+            let mut units = Vec::with_capacity(length + prose.len());
+            while units.len() < length {
+                if !units.is_empty() {
+                    units.extend("\n\n".encode_utf16());
+                }
+                units.extend(&prose);
+            }
+            units.truncate(length);
+            if units.last().is_some_and(|&u| (0xD800..0xDC00).contains(&u)) {
+                units[length - 1] = u16::from(b' ');
+            }
+            let text = String::from_utf16(&units).map_err(|e| format!("bench text: {e}"))?;
+            points.push(
+                json!({ "name": format!("{label}/{length}"), "config": config, "op": "process", "texts": [text] }),
+            );
+        }
+    }
+    Ok(points)
+}
+
+fn samples(command: &mut Command) -> Result<serde_json::Map<String, Value>> {
+    eprintln!("+ {}", show(command));
+    let text = capture(command)?;
+    match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", show(command)))? {
+        Value::Object(map) => Ok(map),
+        _ => Err(format!("{} printed no object of samples", show(command))),
+    }
+}
+
+fn compare(before: &Path, after: &Path, threshold: f64) -> Result {
+    let load = |path: &Path| -> Result<Vec<(String, f64)>> {
+        let snapshot: Value =
+            serde_json::from_slice(&fs::read(path).map_err(at(path.display()))?).map_err(at(path.display()))?;
+        let points =
+            snapshot["points"].as_array().ok_or_else(|| format!("{} is not a bench snapshot", path.display()))?;
+        let mut medians = Vec::new();
+        for point in points {
+            let (Some(name), Some(rust)) = (point["name"].as_str(), point["rust"]["median_ms"].as_f64()) else {
+                return Err(format!("{}: a point without a name or a Rust median", path.display()));
+            };
+            medians.push((format!("rust {name}"), rust));
+            if let Some(wasm) = point["wasm"]["median_ms"].as_f64() {
+                medians.push((format!("wasm {name}"), wasm));
+            }
+        }
+        Ok(medians)
+    };
+    let before = load(before)?;
+    let after = load(after)?;
+    let limit = 1.0 + threshold / 100.0;
+    let mut worse = Vec::new();
+    println!("{:<24} {:>11} {:>11} {:>8}", "point", "before", "after", "ratio");
+    for (name, now) in &after {
+        let Some((_, was)) = before.iter().find(|(n, _)| n == name) else {
+            println!("{name:<24} {:>11} {now:>11.4} {:>8}", "-", "-");
+            continue;
+        };
+        let ratio = now / was;
+        let mark = if ratio > limit {
+            worse.push(name.as_str());
+            "  worse"
+        } else {
+            ""
+        };
+        println!("{name:<24} {was:>11.4} {now:>11.4} {ratio:>8.3}{mark}");
+    }
+    println!("Rust and wasm medians, milliseconds per call; threshold {threshold}%");
+    if worse.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} slower than {threshold}% over the baseline: {}", worse.len(), worse.join(", ")))
+    }
+}
+
+fn options<'a>(
+    args: &[&'a str],
+    valued: &[&str],
+    switches: &[&str],
+) -> Result<(Vec<&'a str>, BTreeMap<&'a str, &'a str>)> {
+    let mut positional = Vec::new();
+    let mut named = BTreeMap::new();
+    let mut rest = args.iter();
+    while let Some(&arg) = rest.next() {
+        if valued.contains(&arg) {
+            named.insert(arg, *rest.next().ok_or_else(|| format!("{arg} needs a value"))?);
+        } else if switches.contains(&arg) {
+            named.insert(arg, "");
+        } else if arg.starts_with("--") {
+            return Err(USAGE.to_owned());
+        } else {
+            positional.push(arg);
+        }
+    }
+    Ok((positional, named))
+}
+
 fn xcframework() -> Result<PathBuf> {
     let root = root();
     header(true)?;
-    let mut libraries = Vec::new();
-    for target in APPLE_TARGETS {
-        run(cargo().env("MACOSX_DEPLOYMENT_TARGET", MACOS).env("SOURCE_DATE_EPOCH", SOURCE_DATE_EPOCH).args([
-            "build",
-            "-p",
-            "microtypo-ffi",
-            "--release",
-            "--locked",
-            "--target",
-            target,
-        ]))?;
-        libraries.push(root.join(format!("target/{target}/release/libmicrotypo_ffi.a")));
-    }
+    run(cargo().env("MACOSX_DEPLOYMENT_TARGET", MACOS).env("SOURCE_DATE_EPOCH", SOURCE_DATE_EPOCH).args([
+        "build",
+        "-p",
+        "microtypo-ffi",
+        "--release",
+        "--locked",
+        "--target",
+        APPLE_TARGET,
+    ]))?;
 
     let work = root.join("target/staging/xcframework");
     fresh_dir(&work)?;
@@ -237,7 +948,7 @@ fn xcframework() -> Result<PathBuf> {
         copy(&include.join(file), &headers.join(file))?;
     }
     let library = work.join("libmicrotypo.a");
-    run(Command::new("lipo").arg("-create").args(&libraries).arg("-output").arg(&library))?;
+    copy(&target_dir().join(format!("{APPLE_TARGET}/release/libmicrotypo_ffi.a")), &library)?;
 
     let framework = root.join("packages/swift/MicroTypoFFI.xcframework");
     if framework.exists() {
@@ -309,7 +1020,7 @@ fn dist(dir: Option<&Path>) -> Result {
         "product": "xcframework",
         "channel": "swiftpm",
         "module": "MicroTypoFFI",
-        "targets": APPLE_TARGETS,
+        "targets": [APPLE_TARGET],
         "macos": MACOS,
         "header": "microtypo.h",
         "size": size(&xcf)?,
@@ -317,12 +1028,12 @@ fn dist(dir: Option<&Path>) -> Result {
         "swiftpm_checksum": checksum,
         }),
     ];
+    let (commit, dirty) = head()?;
     let manifest = json!({
         "name": "microtypo",
         "version": version,
-        "commit": capture(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&root))?,
-        "dirty": !capture(Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).current_dir(&root))?
-            .is_empty(),
+        "commit": commit,
+        "dirty": dirty,
         "files": entries,
         "swift": {
             "package": "MicroTypo",
@@ -338,7 +1049,7 @@ fn dist(dir: Option<&Path>) -> Result {
             "git": format!("https://github.com/meritt/microtypo.rs.git#v{version}"),
         },
         "tools": {
-            "rustc": capture(Command::new(env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("-V").current_dir(&root))?,
+            "rustc": rustc()?,
             "wasm-bindgen": locked_version("wasm-bindgen")?,
             "binaryen": BINARYEN,
             "xcode": capture(Command::new("xcodebuild").arg("-version"))?.lines().next().unwrap_or_default(),
@@ -442,43 +1153,54 @@ fn check_npm(tgz: &Path) -> Result {
     let consumer = root.join("target/staging/consumer/npm");
     fresh_dir(&consumer)?;
     write(&consumer.join("package.json"), "{ \"private\": true, \"type\": \"module\" }\n")?;
+    copy(&root.join("packages/npm/pnpm-workspace.yaml"), &consumer.join("pnpm-workspace.yaml"))?;
     run(Command::new("pnpm").args(["add", "--offline", "--ignore-scripts"]).arg(tgz).current_dir(&consumer))?;
     copy(&root.join("packages/npm/test/consumer.mjs"), &consumer.join("consumer.mjs"))?;
-    run(Command::new("node").arg("consumer.mjs").current_dir(&consumer))?;
+    for source in ["url", "bytes", "module"] {
+        run(Command::new("node").args(["consumer.mjs", source]).current_dir(&consumer))?;
+    }
     run(Command::new("node")
         .arg(root.join("packages/npm/test/corpus.mjs"))
         .arg(consumer.join("node_modules/@meritt/microtypo-wasm/microtypo.js")))
 }
 
-fn check_swift(zip: &Path) -> Result {
+fn swift_test() -> Result {
+    let framework = xcframework()?;
+    let package = swift_package(&root().join("target/staging/swift-test"), &framework, "MicroTypoFFI.xcframework")?;
+    run(Command::new("swift").arg("test").arg("--package-path").arg(&package))
+}
+
+fn swift_package(dir: &Path, binary: &Path, name: &str) -> Result<PathBuf> {
     let root = root();
-    let consumer = root.join("target/staging/consumer/swift");
-    fresh_dir(&consumer)?;
-    let package = consumer.join("microtypo.rs");
+    fresh_dir(dir)?;
+    let package = dir.join("microtypo.rs");
     for item in ["Package.swift", "packages/swift/Sources", "packages/swift/Tests"] {
         copy(&root.join(item), &package.join(item))?;
     }
-    copy(zip, &package.join("MicroTypoFFI.xcframework.zip"))?;
+    copy(binary, &package.join(name))?;
     let manifest = package.join("Package.swift");
     let text = fs::read_to_string(&manifest).map_err(at(manifest.display()))?;
     let remote = r#".binaryTarget(name: "MicroTypoFFI", url: release.url, checksum: release.checksum)"#;
     if text.matches(remote).count() != 1 {
         return Err(format!("Package.swift needs one `{remote}`"));
     }
-    write(
-        &manifest,
-        &text.replace(remote, r#".binaryTarget(name: "MicroTypoFFI", path: "MicroTypoFFI.xcframework.zip")"#),
-    )?;
+    write(&manifest, &text.replace(remote, &format!(r#".binaryTarget(name: "MicroTypoFFI", path: "{name}")"#)))?;
+    Ok(package)
+}
+
+fn check_swift(zip: &Path) -> Result {
+    let consumer = root().join("target/staging/consumer/swift");
+    let package = swift_package(&consumer, zip, "MicroTypoFFI.xcframework.zip")?;
     run(Command::new("swift").arg("test").arg("--package-path").arg(&package))?;
 
     let app = consumer.join("app");
     write(
         &app.join("Package.swift"),
-        "// swift-tools-version: 6.2\n\
+        "// swift-tools-version: 6.4\n\
          import PackageDescription\n\n\
          let package = Package(\n    \
              name: \"App\",\n    \
-             platforms: [.macOS(.v26)],\n    \
+             platforms: [.macOS(.v27)],\n    \
              dependencies: [.package(path: \"../microtypo.rs\")],\n    \
              targets: [.executableTarget(name: \"App\", dependencies: [.product(name: \"MicroTypo\", package: \"microtypo.rs\")])]\n\
          )\n",
@@ -486,7 +1208,7 @@ fn check_swift(zip: &Path) -> Result {
     write(
         &app.join("Sources/App/main.swift"),
         "import MicroTypo\n\n\
-         let text = try MicroTypo(config: [\"html\": false]).process(\"\\\"Амбер\\\" - город\")\n\
+         let text = try MicroTypo(config: .init(html: false)).process(\"\\\"Амбер\\\" - город\")\n\
          guard text == \"«Амбер»\\u{A0}— город\" else { fatalError(\"unexpected \\(text)\") }\n\
          print(\"MicroTypo \\(MicroTypo.version): the package resolves and runs\")\n",
     )?;
@@ -549,6 +1271,15 @@ fn version() -> Result<String> {
         .ok_or_else(|| "cargo metadata has no microtypo-core".to_owned())
 }
 
+fn head() -> Result<(String, bool)> {
+    let git = |args: &[&str]| capture(Command::new("git").args(args).current_dir(root()));
+    Ok((git(&["rev-parse", "HEAD"])?, !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty()))
+}
+
+fn rustc() -> Result<String> {
+    capture(Command::new(env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("-V").current_dir(root()))
+}
+
 fn locked_version(name: &str) -> Result<String> {
     let id = capture(cargo().args(["pkgid", "--locked", "-p", name]))?;
     id.rsplit_once('@').map(|(_, version)| version.to_owned()).ok_or_else(|| format!("cargo pkgid {name}: {id}"))
@@ -607,11 +1338,11 @@ fn copy(from: &Path, to: &Path) -> Result {
     }
 }
 
-fn write(path: &Path, text: &str) -> Result {
+fn write(path: &Path, data: &(impl AsRef<[u8]> + ?Sized)) -> Result {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(at(parent.display()))?;
     }
-    fs::write(path, text).map_err(at(path.display()))
+    fs::write(path, data).map_err(at(path.display()))
 }
 
 fn at<E: Display>(what: impl Display) -> impl FnOnce(E) -> String {

@@ -1,14 +1,20 @@
 pub mod json;
+pub mod raw_json;
 pub mod regex;
 
 use std::sync::LazyLock;
 
-pub use regex::{Caps, Re, escape, escape_str};
+pub use regex::{Caps, Re, escape};
 
+/// Text as UTF-16 code units, the unit of JavaScript strings, offsets and lengths.
 pub type JsString = Vec<u16>;
 
 pub fn u(s: &str) -> JsString {
     s.encode_utf16().collect()
+}
+
+pub fn eq(units: &[u16], s: &str) -> bool {
+    units.iter().copied().eq(s.encode_utf16())
 }
 
 pub fn lossy(s: &[u16]) -> String {
@@ -17,6 +23,7 @@ pub fn lossy(s: &[u16]) -> String {
 
 pub type Lit = LazyLock<JsString>;
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! lit {
     ($s:expr) => {
@@ -24,6 +31,7 @@ macro_rules! lit {
     };
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! cat {
     ($($piece:expr),* $(,)?) => {{
@@ -166,6 +174,12 @@ pub fn is_low(c: u16) -> bool {
     (0xDC00..0xE000).contains(&c)
 }
 
+/// Where a search under the `u` flag starts for the index `at` of `text`: one unit back when
+/// `at` falls between the halves of a surrogate pair, as V8 reads `lastIndex`.
+pub fn pair_start(text: &[u16], at: usize) -> usize {
+    if at > 0 && text.get(at).copied().is_some_and(is_low) && is_high(text[at - 1]) { at - 1 } else { at }
+}
+
 pub fn code_point_at(s: &[u16], i: usize) -> Option<u32> {
     let c = *s.get(i)?;
     if is_high(c)
@@ -184,19 +198,6 @@ pub fn from_code_point(cp: u32) -> JsString {
     } else {
         vec![cp as u16]
     }
-}
-
-pub fn code_points(s: &[u16]) -> impl Iterator<Item = &[u16]> {
-    let mut i = 0;
-    std::iter::from_fn(move || {
-        if i >= s.len() {
-            return None;
-        }
-        let w = if is_high(s[i]) && i + 1 < s.len() && is_low(s[i + 1]) { 2 } else { 1 };
-        let item = &s[i..i + w];
-        i += w;
-        Some(item)
-    })
 }
 
 pub fn is_js_space(c: u16) -> bool {
@@ -349,13 +350,6 @@ pub fn replace_all_lit(s: &[u16], from: &[u16], to: &[u16]) -> JsString {
     out
 }
 
-pub fn replace_first_lit(s: &[u16], from: &[u16], to: &[u16]) -> JsString {
-    match index_of(s, from, 0) {
-        Some(at) => cat!(&s[..at], to, &s[at + from.len()..]),
-        None => s.to_vec(),
-    }
-}
-
 pub fn repeat(s: &[u16], n: usize) -> JsString {
     s.repeat(n)
 }
@@ -393,10 +387,6 @@ pub fn to_upper(s: &[u16]) -> JsString {
         return s.iter().map(|&c| if (u16::from(b'a')..=u16::from(b'z')).contains(&c) { c - 32 } else { c }).collect();
     }
     map_case(s, true)
-}
-
-pub fn is_ascii_digit(c: Option<u16>) -> bool {
-    matches!(c, Some(0x30..=0x39))
 }
 
 pub fn parse_int(s: &[u16]) -> Option<i64> {

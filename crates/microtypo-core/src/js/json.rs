@@ -3,7 +3,6 @@ use super::JsString;
 #[derive(Debug, Clone)]
 pub struct JsonError {
     pub message: String,
-    pub position: usize,
 }
 
 const CR: u16 = 0x0D;
@@ -43,18 +42,18 @@ fn line_column(s: &[u16], pos: usize) -> (usize, usize) {
     (line, pos - line_start + 1)
 }
 
-fn fail(message: JsString, position: usize) -> JsonError {
-    JsonError { message: super::lossy(&message), position }
+fn fail(message: JsString) -> JsonError {
+    JsonError { message: super::lossy(&message) }
 }
 
 fn located(s: &[u16], pos: usize, what: &str) -> JsonError {
     let (line, column) = line_column(s, pos);
-    fail(super::u(&format!("{what} at position {pos} (line {line} column {column})")), pos)
+    fail(super::u(&format!("{what} at position {pos} (line {line} column {column})")))
 }
 
 fn unexpected(s: &[u16], pos: usize) -> JsonError {
     let Some(&c) = s.get(pos) else {
-        return fail(super::u("Unexpected end of JSON input"), pos);
+        return fail(super::u("Unexpected end of JSON input"));
     };
     match c {
         0x2D | 0x30..=0x39 => return located(s, pos, "Unexpected number in JSON"),
@@ -62,7 +61,7 @@ fn unexpected(s: &[u16], pos: usize) -> JsonError {
         _ => {}
     }
     if SPECIAL.iter().any(|w| super::u(w) == s) {
-        return fail([&[0x22], s, &super::u("\" is not valid JSON")].concat(), pos);
+        return fail([&[0x22], s, &super::u("\" is not valid JSON")].concat());
     }
     let n = s.len();
     let (open, context, close) = if n <= 2 * CONTEXT {
@@ -82,7 +81,7 @@ fn unexpected(s: &[u16], pos: usize) -> JsonError {
         &super::u(&format!("\"{close} is not valid JSON")),
     ]
     .concat();
-    fail(message, pos)
+    fail(message)
 }
 
 fn scan_string(s: &[u16], mut i: usize, out: Option<&mut JsString>) -> Result<usize, JsonError> {
@@ -268,7 +267,7 @@ pub fn parse_string(s: &[u16]) -> Result<JsString, JsonError> {
     let i = skip_ws(s, 0);
     if s.get(i) != Some(&0x22) {
         validate(s)?;
-        return Err(JsonError { message: "expected a string".into(), position: i });
+        return Err(JsonError { message: "expected a string".into() });
     }
     let mut out = Vec::new();
     let end = skip_ws(s, scan_string(s, i, Some(&mut out))?);
@@ -322,7 +321,7 @@ mod tests {
     use crate::js::u;
 
     fn message(s: &[u16]) -> String {
-        validate(s).err().map(|e| e.message).unwrap_or_default()
+        validate(s).err().map_or_default(|e| e.message)
     }
 
     #[test]

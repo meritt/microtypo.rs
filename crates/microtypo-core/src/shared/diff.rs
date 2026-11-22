@@ -9,6 +9,48 @@ const WINDOW_GROWTH: usize = 4;
 const MYERS_SPAN: usize = 128;
 
 pub type Range = (usize, usize);
+pub type EqualRange = (usize, usize, usize);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    pub start: usize,
+    pub end: usize,
+    pub text: js::JsString,
+}
+
+pub fn replacement_edits(before: &[u16], after: &[u16], check: &dyn Fn(&str) -> Result<()>) -> Result<Vec<Edit>> {
+    if before == after {
+        return Ok(Vec::new());
+    }
+    let splits_pair = |text: &[u16], at: usize| {
+        at > 0 && at < text.len() && (0xd800..=0xdbff).contains(&text[at - 1]) && (0xdc00..=0xdfff).contains(&text[at])
+    };
+    let mut edits = Vec::new();
+    let mut a = 0;
+    let mut b = 0;
+    for (mut start, mut next, mut length) in equal_ranges(before, after, check)? {
+        if splits_pair(before, start) || splits_pair(after, next) {
+            start += 1;
+            next += 1;
+            length -= 1;
+        }
+        if splits_pair(before, start + length) || splits_pair(after, next + length) {
+            length = length.saturating_sub(1);
+        }
+        if length == 0 {
+            continue;
+        }
+        if start > a || next > b {
+            edits.push(Edit { start: a, end: start, text: after[b..next].to_vec() });
+        }
+        a = start + length;
+        b = next + length;
+    }
+    if a < before.len() || b < after.len() {
+        edits.push(Edit { start: a, end: before.len(), text: after[b..].to_vec() });
+    }
+    Ok(edits)
+}
 
 struct Steps<'a> {
     seen: usize,
@@ -18,11 +60,29 @@ struct Steps<'a> {
 pub fn changed_ranges(before: &[u16], after: &[u16], check_budget: &dyn Fn(&str) -> Result<()>) -> Result<Vec<Range>> {
     let mut ranges = Vec::new();
     let mut steps = Steps { seen: 0, check_budget };
-    walk(before, 0, before.len(), after, 0, after.len(), 0, &mut ranges, &mut steps)?;
-    Ok(merge_touching(ranges))
+    walk(before, 0, before.len(), after, 0, after.len(), 0, &mut ranges, &mut steps, None)?;
+    let whole = |at: usize| at > 0 && js::code_point_at(after, at - 1).is_some_and(|c| c > 0xFFFF);
+    Ok(merge_touching(
+        ranges
+            .into_iter()
+            .map(|(start, end)| (if whole(start) { start - 1 } else { start }, if whole(end) { end + 1 } else { end }))
+            .collect(),
+    ))
 }
 
-#[allow(clippy::too_many_arguments)]
+pub fn equal_ranges(
+    before: &[u16],
+    after: &[u16],
+    check_budget: &dyn Fn(&str) -> Result<()>,
+) -> Result<Vec<EqualRange>> {
+    let mut equal = Vec::new();
+    let mut changed = Vec::new();
+    let mut steps = Steps { seen: 0, check_budget };
+    walk(before, 0, before.len(), after, 0, after.len(), 0, &mut changed, &mut steps, Some(&mut equal))?;
+    Ok(equal)
+}
+
+#[expect(clippy::too_many_arguments, reason = "the recursion carries both ranges, the depth and the shared output")]
 fn walk(
     a: &[u16],
     a_start: usize,
@@ -33,6 +93,7 @@ fn walk(
     level: usize,
     out: &mut Vec<Range>,
     steps: &mut Steps<'_>,
+    mut equal: Option<&mut Vec<EqualRange>>,
 ) -> Result<()> {
     let anchor = ANCHORS[level];
     let mut i = a_start;
@@ -42,9 +103,16 @@ fn walk(
             (steps.check_budget)("changes")?;
         }
         steps.seen += 1;
+        let before = i;
+        let after = j;
         while i < a_end && j < b_end && a[i] == b[j] {
             i += 1;
             j += 1;
+        }
+        if i > before
+            && let Some(equal) = equal.as_deref_mut()
+        {
+            equal.push((before, after, i - before));
         }
         if i == a_end || j == b_end {
             if i != a_end || j != b_end {
@@ -54,9 +122,9 @@ fn walk(
         }
         let (i2, j2) = resync(a, i, a_end, b, j, b_end, anchor);
         if i2 - i + (j2 - j) <= MYERS_SPAN {
-            diff_into(a, i, i2, b, j, j2, out);
+            diff_into(a, i, i2, b, j, j2, out, equal.as_deref_mut());
         } else if level + 1 < ANCHORS.len() {
-            walk(a, i, i2, b, j, j2, level + 1, out, steps)?;
+            walk(a, i, i2, b, j, j2, level + 1, out, steps, equal.as_deref_mut())?;
         } else {
             out.push((j, j2));
         }
@@ -93,7 +161,7 @@ fn anchored(a: &[u16], p: usize, a_end: usize, b: &[u16], q: usize, b_end: usize
     (0..length).all(|k| a[p + k] == b[q + k])
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "two ranges with their texts, the anchor and the search width")]
 fn nearest_common_gram(
     a: &[u16],
     i: usize,
@@ -137,11 +205,29 @@ fn gram_hash(text: &[u16], start: usize, length: usize) -> i32 {
     hash
 }
 
-fn diff_into(a: &[u16], a_start: usize, a_end: usize, b: &[u16], b_start: usize, b_end: usize, out: &mut Vec<Range>) {
+#[expect(
+    clippy::too_many_arguments,
+    reason = "both text ranges and the optional equal-span output mirror the reference"
+)]
+fn diff_into(
+    a: &[u16],
+    a_start: usize,
+    a_end: usize,
+    b: &[u16],
+    b_start: usize,
+    b_end: usize,
+    out: &mut Vec<Range>,
+    mut equal: Option<&mut Vec<EqualRange>>,
+) {
     let (mut a0, mut a1, mut b0, mut b1) = (a_start, a_end, b_start, b_end);
     while a0 < a1 && b0 < b1 && a[a0] == b[b0] {
         a0 += 1;
         b0 += 1;
+    }
+    if a0 > a_start
+        && let Some(equal) = equal.as_deref_mut()
+    {
+        equal.push((a_start, b_start, a0 - a_start));
     }
     while a0 < a1 && b0 < b1 && a[a1 - 1] == b[b1 - 1] {
         a1 -= 1;
@@ -151,14 +237,19 @@ fn diff_into(a: &[u16], a_start: usize, a_end: usize, b: &[u16], b_start: usize,
         if a0 != a1 || b0 != b1 {
             out.push((b0, b1));
         }
-        return;
-    }
-    match middle_snake(a, a0, a1, b, b0, b1) {
-        None => out.push((b0, b1)),
-        Some((sa, sb)) => {
-            diff_into(a, a0, sa, b, b0, sb, out);
-            diff_into(a, sa, a1, b, sb, b1, out);
+    } else {
+        match middle_snake(a, a0, a1, b, b0, b1) {
+            None => out.push((b0, b1)),
+            Some((sa, sb)) => {
+                diff_into(a, a0, sa, b, b0, sb, out, equal.as_deref_mut());
+                diff_into(a, sa, a1, b, sb, b1, out, equal.as_deref_mut());
+            }
         }
+    }
+    if a1 < a_end
+        && let Some(equal) = equal
+    {
+        equal.push((a1, b1, a_end - a1));
     }
 }
 
