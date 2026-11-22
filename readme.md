@@ -31,7 +31,7 @@ const typo = new MicroTypo({ html: false });
 typo.process('"Амбер" - город'); // '«Амбер» — город'
 ```
 
-`load()` берёт `microtypo.wasm` рядом с модулем; можно передать URL, `Response`, байты или `WebAssembly.Module`.
+`load()` берёт `microtypo.wasm` рядом с модулем; можно передать URL, `Response`, байты или `WebAssembly.Module`. После успешной загрузки модуль один на realm: следующие вызовы возвращают тот же объект и аргумент не читают.
 
 ## Swift
 

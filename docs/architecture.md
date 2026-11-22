@@ -51,18 +51,12 @@ Bindings depend on the core and on nothing else.
 
 ## WebAssembly package
 
-```mermaid
-flowchart LR
-  tpl[packages/npm/src/microtypo.js] -->|glue at /* @glue */| js[dist/microtypo.js]
-  glue[wasm-bindgen --target no-modules] --> js
-  mod[microtypo_wasm.wasm] -->|wasm-opt -Os --strip-debug --strip-producers| wasm[dist/microtypo.wasm]
-```
-
-- One ES module with no imports and one top-level name, `load`; it runs in pages, workers and Node.js, with one glue instance per `load()`.
+- `cargo xtask wasm` builds with the `wasm` profile (`opt-level = "s"`), runs `wasm-bindgen --target web`, renames the glue's default module URL to `microtypo.wasm` so bundlers following `new URL(…, import.meta.url)` find it, and runs `wasm-opt -Os --strip-debug --strip-producers` (`-Oz` comes out larger). `dist` fails above 430 000 bytes of `gzip -9` (`WASM_GZIP_BUDGET`).
+- `microtypo.js` exports only `load`. The glue holds one instance per realm: the first successful `load()` instantiates and later calls return the same API without reading their argument; a failed load is not kept. A module reporting another version stays in the glue, so every later `load()` in that realm rejects with `ERR_MICROTYPO_VERSION`. The export check before `initSync` keeps a module from another build out of the glue.
+- `load()` calls `initSync` with a compiled module, never the streaming init; a `file:` URL is read with `node:fs`. `microtypo.js` targets Baseline Newly available and has no capability checks.
 - `onCycleLimit` runs after the pass: JavaScript called mid-pass could reenter the engine.
 - The JavaScript layer checks what only JavaScript values show (`undefined`, functions, symbols) and passes the rest to the engine as JSON.
-- `load()` compares the module's `version` export with the package version and rejects a mismatch with `ERR_MICROTYPO_VERSION`.
-- Built with the `wasm` profile (`opt-level = "s"`); `dist` fails above 430 000 bytes of `gzip -9`.
+- `packages/npm/pnpm-workspace.yaml` sets `minimumReleaseAge` and `trustPolicy`; `dist` copies it into the consumer that installs the packed tarball.
 
 ## Swift package
 

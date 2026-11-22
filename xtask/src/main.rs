@@ -22,8 +22,6 @@ const CORPUS_SOURCE: &str = "test/conformance/corpus.jsonl";
 const CORPUS: &str = "corpus.jsonl";
 const CORPUS_PIN: &str = "testdata/conformance/corpus.sha256";
 
-const GLUE_MARKER: &str = "/* @glue */";
-
 const MACOS: &str = "26.0";
 
 const SOURCE_DATE_EPOCH: &str = "315532800";
@@ -118,11 +116,11 @@ fn wasm() -> Result<PathBuf> {
         "--target",
         "wasm32-unknown-unknown",
     ]))?;
-    let module = root.join("target/wasm32-unknown-unknown/wasm/microtypo_wasm.wasm");
+    let module = target_dir().join("wasm32-unknown-unknown/wasm/microtypo_wasm.wasm");
     let bindgen_out = root.join("target/staging/bindgen");
     fresh_dir(&bindgen_out)?;
     run(Command::new(&bindgen)
-        .args(["--target", "no-modules", "--no-typescript", "--out-dir"])
+        .args(["--target", "web", "--no-typescript", "--out-dir"])
         .arg(&bindgen_out)
         .arg(&module))?;
 
@@ -136,16 +134,16 @@ fn wasm() -> Result<PathBuf> {
 
     let glue = bindgen_out.join("microtypo_wasm.js");
     let glue = fs::read_to_string(&glue).map_err(at(glue.display()))?;
-    if !glue.starts_with("let wasm_bindgen = ") {
-        return Err("the wasm-bindgen glue does not start with `let wasm_bindgen = `".to_owned());
+    if glue.matches("'microtypo_wasm_bg.wasm'").count() != 1 {
+        return Err("the wasm-bindgen glue needs one 'microtypo_wasm_bg.wasm'".to_owned());
     }
+    write(&dist.join("glue.js"), &glue.replace("'microtypo_wasm_bg.wasm'", "'microtypo.wasm'"))?;
     let template = root.join("packages/npm/src/microtypo.js");
     let text = fs::read_to_string(&template).map_err(at(template.display()))?;
-    if text.matches(GLUE_MARKER).count() != 1 || text.matches("'@VERSION@'").count() != 1 {
-        return Err(format!("{} needs one {GLUE_MARKER} and one '@VERSION@'", template.display()));
+    if text.matches("'@VERSION@'").count() != 1 {
+        return Err(format!("{} needs one '@VERSION@'", template.display()));
     }
-    let text = text.replace(GLUE_MARKER, glue.trim_end()).replace("'@VERSION@'", &format!("'{version}'"));
-    write(&dist.join("microtypo.js"), &text)?;
+    write(&dist.join("microtypo.js"), &text.replace("'@VERSION@'", &format!("'{version}'")))?;
     copy(&root.join("LICENSE"), &dist.join("LICENSE"))?;
     copy(&manifest, &dist.join("package.json"))?;
     Ok(dist)
@@ -210,6 +208,10 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
     }
     println!("testdata/conformance is the reference's corpus at {commit}");
     Ok(())
+}
+
+fn target_dir() -> PathBuf {
+    env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), |dir| root().join(dir))
 }
 
 fn xcframework() -> Result<PathBuf> {
@@ -445,7 +447,9 @@ fn check_npm(tgz: &Path) -> Result {
     copy(&root.join("packages/npm/pnpm-workspace.yaml"), &consumer.join("pnpm-workspace.yaml"))?;
     run(Command::new("pnpm").args(["add", "--offline", "--ignore-scripts"]).arg(tgz).current_dir(&consumer))?;
     copy(&root.join("packages/npm/test/consumer.mjs"), &consumer.join("consumer.mjs"))?;
-    run(Command::new("node").arg("consumer.mjs").current_dir(&consumer))?;
+    for source in ["url", "bytes", "module"] {
+        run(Command::new("node").args(["consumer.mjs", source]).current_dir(&consumer))?;
+    }
     run(Command::new("node")
         .arg(root.join("packages/npm/test/corpus.mjs"))
         .arg(consumer.join("node_modules/@meritt/microtypo-wasm/microtypo.js")))
@@ -608,11 +612,11 @@ fn copy(from: &Path, to: &Path) -> Result {
     }
 }
 
-fn write(path: &Path, text: &str) -> Result {
+fn write(path: &Path, data: &(impl AsRef<[u8]> + ?Sized)) -> Result {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(at(parent.display()))?;
     }
-    fs::write(path, text).map_err(at(path.display()))
+    fs::write(path, data).map_err(at(path.display()))
 }
 
 fn at<E: Display>(what: impl Display) -> impl FnOnce(E) -> String {
