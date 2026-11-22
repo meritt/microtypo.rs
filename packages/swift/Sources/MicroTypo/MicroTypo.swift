@@ -255,7 +255,7 @@ public struct Diagnostics: Sendable, Equatable {
         let outcome: Result<Diagnostics, MicroTypoError> = unsafe engine.withLock { engine in
             var out = unsafe microtypo_output()
             var error: OpaquePointer?
-            let ok = unsafe units.withUnsafeBufferPointer {
+            let ok = units.withUnsafeBufferPointer {
                 unsafe microtypo_engine_process_diagnostics(
                     engine, $0.baseAddress, $0.count, optionsJSON, &out, &error)
             }
@@ -271,7 +271,7 @@ public struct Diagnostics: Sendable, Equatable {
                 options.edits
                 ? (0..<rawEdits.count).map { index in
                     let edit = unsafe rawEdits[index]
-                    return Edit(
+                    return unsafe Edit(
                         start: edit.start, end: edit.end,
                         text: unsafe Array(UnsafeBufferPointer(start: edit.units, count: edit.len)))
                 } : nil
@@ -282,7 +282,7 @@ public struct Diagnostics: Sendable, Equatable {
                     let entry = unsafe rawTrace[index]
                     let rule = unsafe Array(UnsafeBufferPointer(start: entry.rule, count: entry.rule_len))
                     let ranges = unsafe UnsafeBufferPointer(start: entry.ranges, count: entry.ranges_len * 2)
-                    return TraceEntry(
+                    return unsafe TraceEntry(
                         rule: rule, kind: entry.kind == 0 ? .regex : .handler, count: entry.count,
                         ranges: stride(from: 0, to: ranges.count, by: 2).map {
                             unsafe ranges[$0]..<ranges[$0 + 1]
