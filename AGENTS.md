@@ -37,6 +37,8 @@ cargo test --workspace --locked
 cargo +nightly-2026-11-20 miri test -p microtypo-ffi --no-default-features --lib --locked
 ```
 
+CI runs all of these on every pull request and push to `main`, Miri in its own `Soundness` job. The Release workflow reuses the green CI run of the tagged commit and adds a fresh advisory audit and `cargo semver-checks` against the previous release.
+
 ## Conformance
 
 ```bash
@@ -88,7 +90,7 @@ cargo xtask pin [--check] [<release set>]
    cargo xtask pin /tmp/microtypo-set
    ```
 
-3. Merge the pin to `main`, tag it and push the tag:
+3. Merge the pin to `main`; once CI is green for that commit, tag it and push the tag. The Release workflow publishes the GitHub release, then the npm tarball from it to GitHub Packages:
 
    ```bash
    git tag -a vX.Y.Z -m "vX.Y.Z"
@@ -98,10 +100,14 @@ cargo xtask pin [--check] [<release set>]
    git push origin vX.Y.Z
    ```
 
-4. Once the Release workflow is green, publish the released tarball:
+4. Once the Release workflow is green, publish the released tarball to npmjs.org:
 
    ```bash
    gh release download vX.Y.Z --repo meritt/microtypo.rs --pattern microtypo-vX.Y.Z-npm.tgz --dir /tmp/microtypo-npm
+   ```
+
+   ```bash
+   gh attestation verify /tmp/microtypo-npm/microtypo-vX.Y.Z-npm.tgz --repo meritt/microtypo.rs --signer-workflow meritt/microtypo.rs/.github/workflows/release.yml --source-ref refs/tags/vX.Y.Z
    ```
 
    ```bash
@@ -116,7 +122,7 @@ Recovery:
 
 | Failed at | Action |
 |---|---|
-| Identity, Gates, Build | rerun; for a code fix delete the tag (`git push origin :refs/tags/vX.Y.Z`), fix on `main`, tag again |
+| Identity, Gates, Build, Provenance | rerun (Gates once CI for the tagged commit is green); for a code fix delete the tag (`git push origin :refs/tags/vX.Y.Z`), fix on `main`, tag again |
 | Draft, Readback, Publish | `gh release delete vX.Y.Z --repo meritt/microtypo.rs --yes`, rerun |
-| Immutability | rerun the failed job |
+| Immutability, Ship | rerun the failed job; Ship accepts a version GitHub Packages already holds with the same tarball |
 | Published release is wrong | release the next patch version |

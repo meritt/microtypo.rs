@@ -62,17 +62,71 @@ jobs:
   gates:
     name: Gates
     needs: identity
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
-    uses: ./.github/workflows/ci.yml
+    env:
+      SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs="$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_COMMIT&event=push&branch=main&status=success&exclude_pull_requests=true" \
+            --jq '[.workflow_runs[] | select(.head_sha == env.SOURCE_COMMIT and .path == ".github/workflows/ci.yml" and .head_repository.full_name == env.REPOSITORY)] | length')"
+          if [ "$runs" -eq 0 ]; then
+            echo "::error::CI has not succeeded on main for the release commit"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup
+        run: rustup toolchain install
+
+      - name: Install
+        env:
+          CARGO_DENY_SHA256: 98c56e6a408bfa5c3c60744b6015aaa6aa08f743fdeb88386d06fca035bb1786
+          SEMVER_CHECKS_SHA256: 396c8508d973c83de52660943a057e971b586f7511c3ba695762373452b43d5b
+        run: |
+          fetch() {
+            curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --output "$2" "$1"
+          }
+          mkdir -p "$RUNNER_TEMP/bin"
+          deny="$RUNNER_TEMP/cargo-deny.tar.gz"
+          fetch https://github.com/EmbarkStudios/cargo-deny/releases/download/0.22.0/cargo-deny-0.22.0-x86_64-unknown-linux-musl.tar.gz "$deny"
+          echo "$CARGO_DENY_SHA256  $deny" | sha256sum -c - > /dev/null
+          tar -xzf "$deny" -C "$RUNNER_TEMP/bin" --strip-components 1 cargo-deny-0.22.0-x86_64-unknown-linux-musl/cargo-deny
+          semver="$RUNNER_TEMP/cargo-semver-checks.tar.gz"
+          fetch https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.51.0/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz "$semver"
+          echo "$SEMVER_CHECKS_SHA256  $semver" | sha256sum -c - > /dev/null
+          tar -xzf "$semver" -C "$RUNNER_TEMP/bin" cargo-semver-checks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Audit
+        run: cargo deny --locked check advisories
+
+      - name: Semver
+        run: |
+          baseline="$(git tag --list 'v*' --no-contains HEAD --sort=-version:refname | head -n 1)"
+          if [ -z "$baseline" ]; then
+            echo "no release to compare with"
+            exit 0
+          fi
+          cargo semver-checks -p microtypo-core --baseline-rev "$baseline"
 
   build:
     name: Build
-    needs:
-      - identity
-      - gates
+    needs: identity
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
@@ -80,6 +134,7 @@ jobs:
       manifest_sha256: ${{ steps.package.outputs.manifest_sha256 }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +179,10 @@ jobs:
           cargo xtask dist "$RUNNER_TEMP/release"
           cargo xtask pin --check "$RUNNER_TEMP/release"
           cd "$RUNNER_TEMP/release"
+          if ! jq -e --arg commit "$SOURCE_COMMIT" '.commit == $commit and .dirty == false' release-manifest.json > /dev/null; then
+            echo "::error::release manifest does not describe a clean build of the release commit"
+            exit 1
+          fi
           printf 'sums_sha256=%s\nmanifest_sha256=%s\n' \
             "$(shasum -a 256 SHA256SUMS | cut -d ' ' -f 1)" \
             "$(shasum -a 256 release-manifest.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -137,11 +196,48 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  provenance:
+    name: Provenance
+    needs:
+      - gates
+      - build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      attestations: write
+      id-token: write
+    env:
+      SUMS_SHA256: ${{ needs.build.outputs.sums_sha256 }}
+      MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+    steps:
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-build
+          path: release-input
+
+      - name: Verify
+        working-directory: release-input
+        run: |
+          if [ "$(sha256sum SHA256SUMS | cut -d ' ' -f 1)" != "$SUMS_SHA256" ] ||
+             [ "$(sha256sum release-manifest.json | cut -d ' ' -f 1)" != "$MANIFEST_SHA256" ]; then
+            echo "::error::signing input is not the exact built set"
+            exit 1
+          fi
+          sha256sum --check --strict SHA256SUMS
+
+      - name: Sign
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-input/*
+
   publish:
     name: Publish
     needs:
       - identity
+      - gates
       - build
+      - provenance
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -168,7 +264,9 @@ jobs:
             exit 1
           fi
           sha256sum --check --strict SHA256SUMS
-          if [ "$(ls | wc -l)" -ne "$(( $(wc -l < SHA256SUMS) + 2 ))" ]; then
+          shopt -s dotglob nullglob
+          entries=(*)
+          if [ "${#entries[@]}" -ne "$(( $(wc -l < SHA256SUMS) + 2 ))" ]; then
             echo "::error::publication input holds files other than the built set"
             exit 1
           fi
@@ -209,6 +307,7 @@ jobs:
   immutability:
     name: Immutability
     needs:
+      - identity
       - build
       - publish
     runs-on: ubuntu-26.04
@@ -218,6 +317,7 @@ jobs:
       contents: read
     env:
       REF: ${{ github.ref_name }}
+      SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
       SUMS_SHA256: ${{ needs.build.outputs.sums_sha256 }}
       REPOSITORY: ${{ github.repository }}
     steps:
@@ -250,4 +350,102 @@ jobs:
           done
           for asset in *; do
             gh release verify-asset "$REF" "$asset" --repo "$REPOSITORY"
+            gh attestation verify "$asset" --repo "$REPOSITORY" --deny-self-hosted-runners \
+              --signer-workflow "$REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$REF" --source-digest "$SOURCE_COMMIT"
           done
+
+  ship:
+    name: Ship
+    needs:
+      - identity
+      - immutability
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      attestations: read
+      contents: read
+      packages: write
+    env:
+      REF: ${{ github.ref_name }}
+      SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
+      REPOSITORY: ${{ github.repository }}
+      PACKAGE: "@meritt/microtypo-wasm"
+      REGISTRY: https://npm.pkg.github.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: packages/npm
+
+      - name: Setup
+        uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
+        with:
+          working-directory: packages/npm
+          install: false
+
+      - name: Download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$REF" --repo "$REPOSITORY" --dir "$RUNNER_TEMP/release" --pattern "microtypo-$REF-npm.tgz"
+
+      - name: Verify
+        working-directory: ${{ runner.temp }}/release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "microtypo-$REF-npm.tgz" --repo "$REPOSITORY" --deny-self-hosted-runners \
+            --signer-workflow "$REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$REF" --source-digest "$SOURCE_COMMIT"
+          manifest="$(tar -xOzf "microtypo-$REF-npm.tgz" package/package.json)"
+          if [ "$(jq -r .name <<< "$manifest")" != "$PACKAGE" ] || [ "$(jq -r .version <<< "$manifest")" != "${REF#v}" ]; then
+            echo "::error::released tarball is not $PACKAGE ${REF#v}"
+            exit 1
+          fi
+
+      - name: Submit
+        working-directory: packages/npm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PNPM_CONFIG__AUTH: |
+            {
+              "https://npm.pkg.github.com": {
+                "@meritt": {
+                  "authToken": ${{ toJSON(github.token) }}
+                }
+              }
+            }
+        run: |
+          tarball="$RUNNER_TEMP/release/microtypo-$REF-npm.tgz"
+          stored="$RUNNER_TEMP/readback.tgz"
+          readback() {
+            local status url
+            status="$(curl --silent --show-error --location --proto '=https' --tlsv1.2 \
+              --header "Authorization: Bearer $GH_TOKEN" --output "$RUNNER_TEMP/packument.json" \
+              --write-out '%{http_code}' "$REGISTRY/${PACKAGE/\//%2f}")"
+            case "$status" in
+              200) ;;
+              404) return 0 ;;
+              *)
+                echo "::error::GitHub Packages answered $status for $PACKAGE"
+                return 1
+                ;;
+            esac
+            url="$(jq -r --arg version "${REF#v}" '.versions[$version].dist.tarball // empty' "$RUNNER_TEMP/packument.json")"
+            if [ -n "$url" ]; then
+              curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+                --header "Authorization: Bearer $GH_TOKEN" --output "$stored" "$url"
+            fi
+          }
+          readback
+          if [ ! -f "$stored" ]; then
+            pnpm publish "$tarball" --registry "$REGISTRY" --no-git-checks
+            readback
+          fi
+          if ! cmp -s "$tarball" "$stored"; then
+            echo "::error::$PACKAGE ${REF#v} in GitHub Packages is not the released tarball"
+            exit 1
+          fi

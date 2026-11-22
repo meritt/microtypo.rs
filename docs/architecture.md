@@ -58,7 +58,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 
 ## Public surface
 
-- Modules are private; the crate root re-exports what a Rust caller and the bindings use, and `cargo doc` shows only that. The surface is checked by `cargo semver-checks` in CI.
+- Modules are private; the crate root re-exports what a Rust caller and the bindings use, and `cargo doc` shows only that. The surface is checked by `cargo semver-checks` in the Release workflow.
 - `process(&str)` returns `Cow<str>`, borrowing the input when no rule changes it; `process_utf16` takes and returns UTF-16 for callers that hold it. `process_with_options` takes the reference `process` options object and returns `Output::Text` or `Output::Diagnostics`.
 - Diagnostics (`changes`, `edits`, `trace`) are selected independently. Source maps ride on the existing restore owners, inline positions and seal/unseal boundaries; nonce text is never diffed against authored text; rejected attempts and structured-value rollbacks discard their events. Processing without diagnostics allocates no maps.
 - `from_json` and `call_json` read JSON through `RawJson`, which keeps original string units (escaped lone surrogates) beside the structure serde validates; names, pattern sources, replacements and selectors come from the raw side. The CLI merges configuration through the same reader. There is no second JSON or regex parser.
@@ -135,4 +135,4 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - Pins: Rust in `rust-toolchain.toml`; the Miri nightly in CI and `AGENTS.md`; Node.js and pnpm in `devEngines` of `packages/npm/package.json` (read by `pnpm/setup`), pnpm also in `pnpm-lock.yaml`; `wasm-bindgen` exactly in `Cargo.toml`, its CLI version from `Cargo.lock`; binaryen 133, checked by `cargo xtask wasm`.
 - CI installs cargo-deny, gitleaks, cargo-semver-checks, binaryen and `wasm-bindgen` as release binaries checked against a SHA-256 in the workflow; a `wasm-bindgen` bump needs the digest of its CLI.
 - The XCFramework is built with `SOURCE_DATE_EPOCH` = 1980-01-01 (mimalloc embeds `__DATE__`/`__TIME__`) and zipped with sorted entries, fixed times and modes, and no extra fields, so two builds of one commit yield identical `SHA256SUMS`.
-- `cargo-deny` checks licences, sources and advisories against `deny.toml`; Dependabot proposes action and crate updates weekly.
+- `cargo-deny` checks licences, sources and advisories against `deny.toml`; Dependabot proposes action, crate, Rust toolchain and npm updates weekly after a seven-day cooldown.

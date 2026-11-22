@@ -7,7 +7,6 @@ on:
   pull_request:
     branches:
       - main
-  workflow_call:
 
 permissions: {}
 
@@ -19,18 +18,31 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-26.04
-    timeout-minutes: 50
+    timeout-minutes: 15
     concurrency:
       group: ci-test-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     permissions:
       contents: read
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
+
+      - name: Restore
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Setup
         run: |
@@ -63,7 +75,6 @@ jobs:
         env:
           CARGO_DENY_SHA256: 98c56e6a408bfa5c3c60744b6015aaa6aa08f743fdeb88386d06fca035bb1786
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-          SEMVER_CHECKS_SHA256: 396c8508d973c83de52660943a057e971b586f7511c3ba695762373452b43d5b
         run: |
           fetch() {
             curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --output "$2" "$1"
@@ -77,10 +88,6 @@ jobs:
           fetch https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz "$leaks"
           echo "$GITLEAKS_SHA256  $leaks" | sha256sum -c - > /dev/null
           tar -xzf "$leaks" -C "$RUNNER_TEMP/bin" gitleaks
-          semver="$RUNNER_TEMP/cargo-semver-checks.tar.gz"
-          fetch https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.51.0/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz "$semver"
-          echo "$SEMVER_CHECKS_SHA256  $semver" | sha256sum -c - > /dev/null
-          tar -xzf "$semver" -C "$RUNNER_TEMP/bin" cargo-semver-checks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Audit
@@ -96,29 +103,70 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      - name: Semver
-        run: |
-          baseline="$(git tag --list 'v*' --no-contains HEAD --sort=-version:refname | head -n 1)"
-          if [ -z "$baseline" ]; then
-            echo "no release to compare with"
-            exit 0
-          fi
-          cargo semver-checks -p microtypo-core --baseline-rev "$baseline"
+      - name: Save
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ steps.restore.outputs.cache-primary-key }}
+
+  soundness:
+    name: Soundness
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    concurrency:
+      group: ci-soundness-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: 0
+      MIRI_TOOLCHAIN: nightly-2026-11-20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cache/miri/
+            target/
+          key: soundness-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: soundness-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}-
 
       - name: Setup
-        env:
-          MIRI_TOOLCHAIN: nightly-2026-11-20
-        run: |
-          rustup toolchain install "$MIRI_TOOLCHAIN" --profile minimal --component miri,rust-src
-          echo "MIRI_TOOLCHAIN=$MIRI_TOOLCHAIN" >> "$GITHUB_ENV"
+        run: rustup toolchain install "$MIRI_TOOLCHAIN" --profile minimal --component miri,rust-src
 
       - name: Soundness
         run: cargo "+$MIRI_TOOLCHAIN" miri test -p microtypo-ffi --no-default-features --lib --locked
 
+      - name: Save
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cache/miri/
+            target/
+          key: ${{ steps.restore.outputs.cache-primary-key }}
+
   build:
     name: Build
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 15
     concurrency:
       group: ci-build-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
