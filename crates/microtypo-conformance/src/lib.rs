@@ -2,8 +2,9 @@ use std::fmt::Write as _;
 use std::sync::LazyLock;
 use std::time::Instant;
 
-use microtypo_core::{Error, Host, MicroTypo, Output};
-use serde_json::Value;
+use microtypo_core::internals::{default_groups, generated, interpreted};
+use microtypo_core::{Error, Host, MicroTypo, Output, Replacement, RuleBody};
+use serde_json::{Value, json};
 
 /// The host of a native process: the monotonic clock and the system CSPRNG.
 pub const HOST: Host = Host { now_ms, fill_random };
@@ -15,6 +16,53 @@ fn now_ms() -> f64 {
 
 fn fill_random(bytes: &mut [u8]) {
     getrandom::fill(bytes).expect("the system CSPRNG is available");
+}
+
+pub fn registry() -> Value {
+    let replacement = |r: &Replacement| match r {
+        Replacement::Template(t) => json!({ "kind": "string", "value": String::from_utf16_lossy(t) }),
+        Replacement::Func(_) => json!({ "kind": "function" }),
+    };
+    let groups = default_groups().into_iter().map(|(name, def)| {
+        let rules = def.rules.iter().map(|rule| {
+            let body = match &rule.body {
+                RuleBody::Handler(_) => json!({ "kind": "handler" }),
+                RuleBody::Patterns(patterns) => json!({
+                    "kind": "patterns",
+                    "patterns": patterns.iter().map(|(re, r)| json!({
+                        "source": re.source(),
+                        "flags": re.flags(),
+                        "replacement": replacement(r),
+                    })).collect::<Vec<_>>(),
+                }),
+            };
+            let (requires, requires_any, requires_pattern) = rule.requirements();
+            json!({
+                "id": rule.id,
+                "enabled": rule.enabled,
+                "description": rule.description,
+                "htmlOnly": rule.html_only,
+                "cycled": rule.cycled,
+                "requires": requires,
+                "requiresAny": requires_any,
+                "requiresPattern": requires_pattern.map(|re| json!({ "source": re.source(), "flags": re.flags() })),
+                "body": body,
+            })
+        });
+        json!({
+            "name": name,
+            "title": def.title,
+            "classes": def.classes,
+            "preParse": def.pre_parse.is_some(),
+            "rules": rules.collect::<Vec<_>>(),
+        })
+    });
+    let generated = generated().iter().map(|&(source, flags, ..)| (source, flags));
+    let builtins = generated.chain(interpreted().iter().map(|&(source, flags, _)| (source, flags)));
+    json!({
+        "groups": groups.collect::<Vec<_>>(),
+        "builtins": builtins.map(|(source, flags)| json!([source, flags])).collect::<Vec<_>>(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Write as _};
+use std::hash::{BuildHasher, RandomState};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,15 @@ use std::{env, fs};
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | dist [<dir>] \
-                     | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check]";
+                     | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check] \
+                     | parity [<src>] [--ref REV] \
+                     | fuzz <src> [--cases N] [--seed S] [--jobs N] [--ref REV] [--keep-going | --coverage] [--reuse] \
+                     | bench [<src>] [--json] [--ref REV] | bench --compare <a.json> <b.json> [--threshold PCT]";
+
+const REFERENCE_FILES: [&str; 5] =
+    ["package.json", "src", "test/conformance/corpus.jsonl", "test/conformance/replay.mjs", "test/fixtures"];
+
+const BENCH_LENGTHS: [usize; 3] = [300, 3_000, 28_000];
 
 const RELEASES: &str = "https://github.com/meritt/microtypo.rs/releases/download";
 
@@ -58,6 +67,9 @@ fn main() -> ExitCode {
         ["corpus", src] => corpus(false, Some(Path::new(src))),
         ["matchers"] => matchers(false),
         ["matchers", "--check"] => matchers(true),
+        ["parity", rest @ ..] => parity(rest),
+        ["fuzz", rest @ ..] => fuzz(rest),
+        ["bench", rest @ ..] => bench(rest),
         _ => Err(USAGE.to_owned()),
     };
     match result {
@@ -175,6 +187,9 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
             return Err(format!("{} has uncommitted changes: pin a committed corpus", source.display()));
         }
         let commit = git(&["log", "-1", "--format=%H", "--", CORPUS_SOURCE])?;
+        if let Err(error) = check_parity(&source, Some(&commit)) {
+            eprintln!("xtask: {error}; port the rules before replaying the corpus");
+        }
         copy(&source.join(CORPUS_SOURCE), &copy_path)?;
         let pin = format!("commit {commit}\n{}  {CORPUS}\n", sha256(&copy_path)?);
         write(&pin_path, &pin)?;
@@ -182,21 +197,8 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
         return Ok(());
     }
 
-    let pin = fs::read_to_string(&pin_path).map_err(at(pin_path.display()))?;
-    let mut commit = None;
-    let mut sha = None;
-    for line in pin.lines().filter(|l| !l.is_empty()) {
-        if let Some(c) = line.strip_prefix("commit ") {
-            commit = Some(c);
-        } else if let Some(s) = line.strip_suffix(&format!("  {CORPUS}")) {
-            sha = Some(s);
-        } else {
-            return Err(format!("{CORPUS_PIN}: unexpected line {line:?}"));
-        }
-    }
-    let (Some(commit), Some(sha)) = (commit, sha) else {
-        return Err(format!("{CORPUS_PIN} needs a commit and the SHA-256 of {CORPUS}"));
-    };
+    let (commit, sha) = corpus_pin()?;
+    let commit = commit.as_str();
     if sha256(&copy_path)? != sha {
         return Err(format!("testdata/conformance/{CORPUS} differs from {CORPUS_PIN}: run `cargo xtask corpus`"));
     }
@@ -218,6 +220,23 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
     }
     println!("testdata/conformance is the reference's corpus at {commit}");
     Ok(())
+}
+
+fn corpus_pin() -> Result<(String, String)> {
+    let pin_path = root().join(CORPUS_PIN);
+    let pin = fs::read_to_string(&pin_path).map_err(at(pin_path.display()))?;
+    let mut commit = None;
+    let mut sha = None;
+    for line in pin.lines().filter(|l| !l.is_empty()) {
+        if let Some(c) = line.strip_prefix("commit ") {
+            commit = Some(c.to_owned());
+        } else if let Some(s) = line.strip_suffix(&format!("  {CORPUS}")) {
+            sha = Some(s.to_owned());
+        } else {
+            return Err(format!("{CORPUS_PIN}: unexpected line {line:?}"));
+        }
+    }
+    commit.zip(sha).ok_or_else(|| format!("{CORPUS_PIN} needs a commit and the SHA-256 of {CORPUS}"))
 }
 
 fn matchers(check: bool) -> Result {
@@ -355,6 +374,349 @@ fn conformance() -> PathBuf {
     target_dir().join("release/microtypo-conformance")
 }
 
+struct Reference {
+    dir: PathBuf,
+    commit: String,
+}
+
+impl Drop for Reference {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.dir));
+    }
+}
+
+fn reference(repo: &Path, rev: Option<&str>) -> Result<Reference> {
+    let rev = match rev {
+        Some(rev) => rev.to_owned(),
+        None => corpus_pin()?.0,
+    };
+    let git = || {
+        let mut command = Command::new("git");
+        command.current_dir(repo);
+        command
+    };
+    let commit = capture(git().args(["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]))
+        .map_err(|_| format!("{} has no commit {rev}", repo.display()))?;
+    let dir = target_dir().join("reference").join(format!("{}-{}", &commit[..12], std::process::id()));
+    fresh_dir(&dir)?;
+    let reference = Reference { dir, commit };
+    let files =
+        capture(git().args(["ls-tree", "-r", "-z", "--name-only", &reference.commit, "--"]).args(REFERENCE_FILES))?;
+    for path in files.split('\0').filter(|p| !p.is_empty()) {
+        let mut command = git();
+        command.args(["show", &format!("{}:{path}", reference.commit)]);
+        let output = command.stderr(Stdio::inherit()).output().map_err(at(show(&command)))?;
+        if !output.status.success() {
+            return Err(format!("{} failed: {}", show(&command), output.status));
+        }
+        write(&reference.dir.join(path), &output.stdout)?;
+    }
+    for file in REFERENCE_FILES {
+        if !reference.dir.join(file).exists() {
+            return Err(format!("{} has no {file} at {}", repo.display(), reference.commit));
+        }
+    }
+    Ok(reference)
+}
+
+fn parity(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref"], &[])?;
+    check_parity(&repo(&positional)?, named.get("--ref").copied())
+}
+
+fn repo(positional: &[&str]) -> Result<PathBuf> {
+    match positional {
+        [] => Ok(root().join("../microtypo")),
+        [repo] => Ok(PathBuf::from(repo)),
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+fn check_parity(repo: &Path, rev: Option<&str>) -> Result {
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    let registry = capture(Command::new(conformance()).arg("--registry"))?;
+    let rust = target_dir().join("parity/rust.json");
+    write(&rust, &registry)?;
+    let reference = reference(repo, rev)?;
+    let mut command = Command::new("node");
+    command
+        .arg(root().join("xtask/parity/parity.mjs"))
+        .arg("--ref-dir")
+        .arg(&reference.dir)
+        .arg("--rust")
+        .arg(&rust)
+        .args(["--rev", &reference.commit])
+        .arg("--cache")
+        .arg(target_dir().join("parity"));
+    let status = command.status().map_err(at(show(&command)))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the rules or expressions of the core differ from the reference at {}", reference.commit))
+    }
+}
+
+fn fuzz(args: &[&str]) -> Result {
+    let (positional, named) =
+        options(args, &["--cases", "--seed", "--jobs", "--ref"], &["--keep-going", "--coverage", "--reuse"])?;
+    let [repo] = positional.as_slice() else { return Err(USAGE.to_owned()) };
+    let coverage = named.contains_key("--coverage");
+    if coverage && named.contains_key("--reuse") {
+        return Err("--reuse does not apply to --coverage".to_owned());
+    }
+    let number = |flag: &str, default: u64| -> Result<u64> {
+        named.get(flag).map_or(Ok(default), |v| v.parse().map_err(|e| format!("{flag} {v}: {e}")))
+    };
+    let cases = number("--cases", if coverage { 100_000 } else { 10_000 })?;
+    let seed = number("--seed", u64::from(RandomState::new().hash_one(std::process::id()) as u32))?;
+    let jobs = number("--jobs", std::thread::available_parallelism().map_or(1, |n| n.get() as u64))?;
+    if jobs == 0 || jobs > 1024 {
+        return Err("--jobs must be between 1 and 1024".to_owned());
+    }
+    if seed > u64::from(u32::MAX) {
+        return Err(format!("--seed {seed} is over {}", u32::MAX));
+    }
+
+    let root = root();
+    if !coverage {
+        run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    }
+    let reference = reference(Path::new(repo), named.get("--ref").copied())?;
+    let mut command = Command::new("node");
+    command
+        .arg(root.join("xtask/fuzz/fuzz.mjs"))
+        .arg("--ref-dir")
+        .arg(&reference.dir)
+        .arg("--replay")
+        .arg(conformance())
+        .args([
+            "--seed",
+            &seed.to_string(),
+            "--cases",
+            &cases.to_string(),
+            "--jobs",
+            &jobs.to_string(),
+            "--rev",
+            &reference.commit,
+        ])
+        .arg("--failures")
+        .arg(target_dir().join("fuzz-failures.jsonl"))
+        .arg("--unshrunk")
+        .arg(target_dir().join("fuzz-unshrunk.jsonl"))
+        .arg("--cache")
+        .arg(target_dir().join("fuzz"));
+    for flag in ["--keep-going", "--coverage", "--reuse"] {
+        if named.contains_key(flag) {
+            command.arg(flag);
+        }
+    }
+    run(&mut command)
+}
+
+fn bench(args: &[&str]) -> Result {
+    let (positional, named) = options(args, &["--ref", "--threshold"], &["--json", "--compare"])?;
+    if named.contains_key("--compare") {
+        let [before, after] = positional.as_slice() else { return Err(USAGE.to_owned()) };
+        let threshold: f64 =
+            named.get("--threshold").map_or(Ok(10.0), |v| v.parse().map_err(|e| format!("--threshold {v}: {e}")))?;
+        return compare(Path::new(before), Path::new(after), threshold);
+    }
+    let repo = repo(&positional)?;
+
+    let root = root();
+    let reference = reference(&repo, named.get("--ref").copied())?;
+    let points = bench_points(&reference.dir)?;
+    let points_path = reference.dir.join("bench-points.json");
+    write(&points_path, &serde_json::to_string(&points).map_err(|e| e.to_string())?)?;
+
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-core", "--example", "profile"]))?;
+    let rust = samples(Command::new(target_dir().join("release/examples/profile")).arg("bench").arg(&points_path))?;
+    let js =
+        samples(Command::new("node").arg(root.join("xtask/bench/bench.mjs")).arg(&reference.dir).arg(&points_path))?;
+
+    let mut rows = Vec::new();
+    for point in &points {
+        let name = point["name"].as_str().unwrap_or_default();
+        let stats = |all: &serde_json::Map<String, Value>| -> Result<Value> {
+            let mut values: Vec<f64> = all
+                .get(name)
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("no samples for {name}"))?
+                .iter()
+                .filter_map(Value::as_f64)
+                .collect();
+            if values.is_empty() {
+                return Err(format!("no samples for {name}"));
+            }
+            values.sort_by(f64::total_cmp);
+            let rank = |q: f64| values[((q * values.len() as f64).ceil() as usize).clamp(1, values.len()) - 1];
+            Ok(json!({ "median_ms": rank(0.5), "p95_ms": rank(0.95), "samples": values.len() }))
+        };
+        rows.push(json!({ "name": name, "rust": stats(&rust)?, "js": stats(&js)? }));
+    }
+
+    if named.contains_key("--json") {
+        let (commit, dirty) = head()?;
+        let snapshot = json!({
+            "schema": 1,
+            "engine": version()?,
+            "commit": commit,
+            "dirty": dirty,
+            "reference": reference.commit,
+            "rustc": rustc()?,
+            "node": capture(Command::new("node").arg("--version"))?,
+            "points": rows,
+        });
+        println!("{}", serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+
+    let ms = |row: &Value, side: &str, key: &str| row[side][key].as_f64().unwrap_or(f64::NAN);
+    println!(
+        "{:<18} {:>11} {:>11} {:>11} {:>11} {:>8}",
+        "point", "rust median", "rust p95", "js median", "js p95", "rust/js"
+    );
+    for row in &rows {
+        println!(
+            "{:<18} {:>11.4} {:>11.4} {:>11.4} {:>11.4} {:>8.2}",
+            row["name"].as_str().unwrap_or_default(),
+            ms(row, "rust", "median_ms"),
+            ms(row, "rust", "p95_ms"),
+            ms(row, "js", "median_ms"),
+            ms(row, "js", "p95_ms"),
+            ms(row, "rust", "median_ms") / ms(row, "js", "median_ms"),
+        );
+    }
+    println!("milliseconds per call; reference {}", reference.commit);
+    Ok(())
+}
+
+fn bench_points(reference: &Path) -> Result<Vec<Value>> {
+    let big = reference.join("test/fixtures/big-text");
+    let mut files: Vec<PathBuf> = fs::read_dir(&big)
+        .map_err(at(big.display()))?
+        .map(|entry| entry.map(|e| e.path()).map_err(at(big.display())))
+        .collect::<Result<_>>()?;
+    files.retain(|path| path.to_string_lossy().ends_with(".input.txt"));
+    files.sort();
+    let prose = files
+        .iter()
+        .map(|path| fs::read_to_string(path).map_err(at(path.display())))
+        .collect::<Result<Vec<_>>>()?
+        .join("\n\n");
+    let prose: Vec<u16> = prose.encode_utf16().collect();
+    if prose.is_empty() {
+        return Err(format!("{} has no *.input.txt", big.display()));
+    }
+
+    let corpus = reference.join("test/fixtures/corpus.json");
+    let corpus: Value =
+        serde_json::from_slice(&fs::read(&corpus).map_err(at(corpus.display()))?).map_err(at(corpus.display()))?;
+    let short: Vec<Value> = corpus
+        .as_array()
+        .map_or_default(|cases| cases.iter().filter(|c| c["text"].is_string()).map(|c| c["text"].clone()).collect());
+
+    let mut points = Vec::new();
+    for (label, config) in [
+        ("default", Value::Null),
+        ("html", json!({ "html": true, "entities": true })),
+        ("markdown", json!({ "input": "markdown" })),
+    ] {
+        points.push(json!({ "name": format!("{label}/new"), "config": config, "op": "new" }));
+        points.push(json!({ "name": format!("{label}/short"), "config": config, "op": "process", "texts": short }));
+        for length in BENCH_LENGTHS {
+            let mut units = Vec::with_capacity(length + prose.len());
+            while units.len() < length {
+                if !units.is_empty() {
+                    units.extend("\n\n".encode_utf16());
+                }
+                units.extend(&prose);
+            }
+            units.truncate(length);
+            if units.last().is_some_and(|&u| (0xD800..0xDC00).contains(&u)) {
+                units[length - 1] = u16::from(b' ');
+            }
+            let text = String::from_utf16(&units).map_err(|e| format!("bench text: {e}"))?;
+            points.push(
+                json!({ "name": format!("{label}/{length}"), "config": config, "op": "process", "texts": [text] }),
+            );
+        }
+    }
+    Ok(points)
+}
+
+fn samples(command: &mut Command) -> Result<serde_json::Map<String, Value>> {
+    eprintln!("+ {}", show(command));
+    let text = capture(command)?;
+    match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", show(command)))? {
+        Value::Object(map) => Ok(map),
+        _ => Err(format!("{} printed no object of samples", show(command))),
+    }
+}
+
+fn compare(before: &Path, after: &Path, threshold: f64) -> Result {
+    let load = |path: &Path| -> Result<Vec<(String, f64)>> {
+        let snapshot: Value =
+            serde_json::from_slice(&fs::read(path).map_err(at(path.display()))?).map_err(at(path.display()))?;
+        snapshot["points"]
+            .as_array()
+            .ok_or_else(|| format!("{} is not a bench snapshot", path.display()))?
+            .iter()
+            .map(|p| match (p["name"].as_str(), p["rust"]["median_ms"].as_f64()) {
+                (Some(name), Some(median)) => Ok((name.to_owned(), median)),
+                _ => Err(format!("{}: a point without a name or a Rust median", path.display())),
+            })
+            .collect()
+    };
+    let before = load(before)?;
+    let after = load(after)?;
+    let limit = 1.0 + threshold / 100.0;
+    let mut worse = Vec::new();
+    println!("{:<18} {:>11} {:>11} {:>8}", "point", "before", "after", "ratio");
+    for (name, now) in &after {
+        let Some((_, was)) = before.iter().find(|(n, _)| n == name) else {
+            println!("{name:<18} {:>11} {now:>11.4} {:>8}", "-", "-");
+            continue;
+        };
+        let ratio = now / was;
+        let mark = if ratio > limit {
+            worse.push(name.as_str());
+            "  worse"
+        } else {
+            ""
+        };
+        println!("{name:<18} {was:>11.4} {now:>11.4} {ratio:>8.3}{mark}");
+    }
+    println!("Rust median, milliseconds per call; threshold {threshold}%");
+    if worse.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} slower than {threshold}% over the baseline: {}", worse.len(), worse.join(", ")))
+    }
+}
+
+fn options<'a>(
+    args: &[&'a str],
+    valued: &[&str],
+    switches: &[&str],
+) -> Result<(Vec<&'a str>, BTreeMap<&'a str, &'a str>)> {
+    let mut positional = Vec::new();
+    let mut named = BTreeMap::new();
+    let mut rest = args.iter();
+    while let Some(&arg) = rest.next() {
+        if valued.contains(&arg) {
+            named.insert(arg, *rest.next().ok_or_else(|| format!("{arg} needs a value"))?);
+        } else if switches.contains(&arg) {
+            named.insert(arg, "");
+        } else if arg.starts_with("--") {
+            return Err(USAGE.to_owned());
+        } else {
+            positional.push(arg);
+        }
+    }
+    Ok((positional, named))
+}
+
 fn xcframework() -> Result<PathBuf> {
     let root = root();
     header(true)?;
@@ -460,12 +822,12 @@ fn dist(dir: Option<&Path>) -> Result {
         "swiftpm_checksum": checksum,
         }),
     ];
+    let (commit, dirty) = head()?;
     let manifest = json!({
         "name": "microtypo",
         "version": version,
-        "commit": capture(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&root))?,
-        "dirty": !capture(Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).current_dir(&root))?
-            .is_empty(),
+        "commit": commit,
+        "dirty": dirty,
         "files": entries,
         "swift": {
             "package": "MicroTypo",
@@ -481,7 +843,7 @@ fn dist(dir: Option<&Path>) -> Result {
             "git": format!("https://github.com/meritt/microtypo.rs.git#v{version}"),
         },
         "tools": {
-            "rustc": capture(Command::new(env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("-V").current_dir(&root))?,
+            "rustc": rustc()?,
             "wasm-bindgen": locked_version("wasm-bindgen")?,
             "binaryen": BINARYEN,
             "xcode": capture(Command::new("xcodebuild").arg("-version"))?.lines().next().unwrap_or_default(),
@@ -693,6 +1055,15 @@ fn version() -> Result<String> {
         .and_then(|p| p["version"].as_str())
         .map(str::to_owned)
         .ok_or_else(|| "cargo metadata has no microtypo-core".to_owned())
+}
+
+fn head() -> Result<(String, bool)> {
+    let git = |args: &[&str]| capture(Command::new("git").args(args).current_dir(root()));
+    Ok((git(&["rev-parse", "HEAD"])?, !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty()))
+}
+
+fn rustc() -> Result<String> {
+    capture(Command::new(env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("-V").current_dir(root()))
 }
 
 fn locked_version(name: &str) -> Result<String> {

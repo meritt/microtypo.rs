@@ -43,10 +43,22 @@ cargo +nightly-2026-11-20 miri test -p microtypo-ffi --no-default-features --lib
 cargo test -p microtypo-core --release --test conformance
 node packages/npm/test/corpus.mjs packages/npm/dist/microtypo.js
 MICROTYPO_CORPUS_ONLY=<id> cargo test -p microtypo-core --release --test conformance
+cargo xtask parity [../microtypo] [--ref <rev>]
 cargo xtask corpus ../microtypo
 ```
 
-`MICROTYPO_CORPUS` overrides the corpus file. Mismatches go to `target/conformance-failures.jsonl`. The last command copies a rebuilt reference corpus and repins `corpus.sha256`; the corpus is never edited here.
+`MICROTYPO_CORPUS` overrides the corpus file (absolute path). Mismatches go to `target/conformance-failures.jsonl`. `parity` compares the rule registry and the expressions the reference runs at the commit in `corpus.sha256` (or `--ref`) with the core and exits 1 on a difference not listed in `xtask/parity/exceptions.mjs`. The last command runs `parity` against the commit of the new corpus, copies the corpus and repins `corpus.sha256`; the corpus is never edited here.
+
+## Fuzzing and speed
+
+```bash
+cargo xtask fuzz ../microtypo --cases 300000 [--seed <n>] [--ref <rev>] [--jobs <n>] [--reuse] [--keep-going]
+cargo xtask fuzz ../microtypo --coverage [--cases 100000]
+cargo xtask bench [--json] [--ref <rev>]
+cargo xtask bench --compare <before.json> <after.json> [--threshold 10]
+```
+
+`fuzz` compares the core with the reference at the commit in `corpus.sha256` (or `--ref`) and exits 1 on a divergence; shrunk divergences go to `target/fuzz-failures.jsonl` and those past the shrinking budget to `target/fuzz-unshrunk.jsonl`, both replayed by `MICROTYPO_CORPUS`; each run replaces them, and a run without divergences removes them. `--reuse` processes the texts of eight consecutive cases on one instance built from the first case's configuration, on both sides, and compares every call. `--coverage` exits 1 when a rule changes the output, or a regular expression of the reference matches, in fewer than 30 generated cases per 100 000; expressions that cannot match are listed with a reason in `xtask/fuzz/patterns.mjs`. `bench` prints Rust against the reference engine; `--json` prints a snapshot, and `--compare` exits 1 when a Rust median is slower than the threshold in percent.
 
 ## Build
 

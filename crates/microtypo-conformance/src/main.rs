@@ -30,13 +30,21 @@ fn patterns() -> io::Result<()> {
     Ok(())
 }
 
+fn registry() -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    writeln!(out, "{}", microtypo_conformance::registry())
+}
+
 fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|_| {}));
     let outcome = match std::env::args().nth(1).as_deref() {
         None => serve(),
         Some("--patterns") => patterns(),
+        Some("--registry") => registry(),
         Some(other) => {
-            eprintln!("microtypo-conformance: unknown argument {other}; usage: microtypo-conformance [--patterns]");
+            eprintln!(
+                "microtypo-conformance: unknown argument {other}; usage: microtypo-conformance [--patterns | --registry]"
+            );
             return ExitCode::FAILURE;
         }
     };

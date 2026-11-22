@@ -8,7 +8,7 @@ Known divergences:
 
 - A lone surrogate in the `message` or `details` of an error is rendered as U+FFFD.
 - `maxProcessingMs` also holds inside a regex search, so a stage the reference runs past the budget and only then reports ends here as soon as the budget is spent, with the same error.
-- Under `u` or `v`, a search from an index between the halves of a surrogate pair starts at the pair, as in V8 (`/./uy` from 2 in `a😀b` matches 1..3), but never tries the index itself: `/\B/uy` and `/(?<!a)/uy` from 2 and `/\B/gu` find an empty match at 2 in V8 and none here. regress reads the low half as a lone surrogate, so an attempt there would accept matches V8 rejects (`/(?<=[^a])/uy` from 2). No built-in expression in the corpus needs a match between the halves.
+- Under `u` or `v`, a search from an index between the halves of a surrogate pair starts at the pair, as in V8 (`/./uy` from 2 in `a😀b` matches 1..3), but never tries the index itself: `/\B/uy` and `/(?<!a)/uy` from 2 and `/\B/gu` find an empty match at 2 in V8 and none here. regress reads the low half as a lone surrogate, so an attempt there would accept matches V8 rejects (`/(?<=[^a])/uy` from 2). No built-in expression in the corpus or the fuzzer needs a match between the halves.
 
 ## Layout
 
@@ -30,11 +30,11 @@ flowchart LR
 | `crates/microtypo-core` | engine: rules, input formats, markup protection, budgets; `forbid(unsafe_code)` |
 | `crates/microtypo-ffi` | C ABI, header in `include/microtypo.h`; the only workspace crate with `unsafe` |
 | `crates/microtypo-wasm` | `wasm-bindgen` boundary |
-| `crates/microtypo-conformance` | replays corpus cases against the core for the conformance test and, as a JSONL filter, for `matchers` |
+| `crates/microtypo-conformance` | replays corpus cases against the core for the conformance test and, as a JSONL filter, for the fuzzer, `parity` and `matchers` |
 | `packages/npm` | `@meritt/microtypo-wasm`: JavaScript API over the module |
 | `packages/swift`, `Package.swift` | Swift package `MicroTypo` over the XCFramework |
 | `vendor/regress` | ECMAScript regex engine over UTF-16, prefilter, matcher generator |
-| `xtask` | header, builds, release set, corpus copy, matcher generation |
+| `xtask` | header, builds, release set, corpus copy, parity guard, matcher generation, differential fuzzer, benchmark |
 
 Bindings depend on no workspace crate but the core. Core tests are `tests/behaviour` (library behaviour), `tests/growth` (linear scaling and timing), `tests/conformance.rs` and `tests/matchers.rs`.
 
@@ -70,7 +70,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - `v` follows the pinned Node.js V8, including its quirks: under `i` a one-code-point `\q{}` string keeps only its folded code point, while longer strings match ignoring case.
 - regress reads a prefilter off every compiled expression, including those built at run time: start, second-unit, preceding-unit and required unit sets, required strings, and runs a match must lie in. Every check is a necessary condition, so it skips positions without changing the match found; a construct the analysis does not understand widens its set to every unit, which turns that check off. Restricting a search to runs narrows the starts only: the matcher always gets the whole input, since a lookbehind can read before a run.
 - The required strings come from an analysis of the IR whose cost grows with the alternations it combines, so it stays off the path of a constructor for built-in expressions: `cargo xtask matchers` runs it on each of them without a limit and writes its outcome, strings or none, into `FACTOR_DATA` in `matchers.rs`, which `compile` hands to regress (`FactorSource::Given`). The last column of `MATCHERS` and of `INTERPRETED_FACTORS` is where a pattern's outcome starts; offset 0 holds a count of no strings. `INTERPRETED_FACTORS` repeats the patterns of `INTERPRETED` so that the reasons, which only the tests read, stay out of the binary. The runs a match must lie in come from the expression in one pass, so they are not written out. An expression built at run time is analysed within `FactorSource::WORK` and goes without required strings past it, which leaves its matches the same.
-- In a debug build a search the prefilter rules out runs anyway and panics on a match, and a search kept to runs is repeated over the rest of the input and must agree. The conformance and matcher tests run that way.
+- In a debug build a search the prefilter rules out runs anyway and panics on a match, and a search kept to runs is repeated over the rest of the input and must agree. The conformance and matcher tests run that way; for the fuzzer, set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`.
 
 ## Generated matchers
 
@@ -101,6 +101,19 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 ## Swift package
 
 `Package.swift` sits at the repository root. A checkout with `packages/swift/MicroTypoFFI.xcframework` uses it; otherwise SwiftPM downloads the release XCFramework by the URL and checksum `cargo xtask pin` writes from the release set CI built. Headers live in a module-named folder so `module.modulemap` cannot collide with another XCFramework. `MicroTypo` serialises calls with `NSLock`, so one instance is shareable across threads. It checks values before `JSONSerialization`, which raises an uncatchable Objective-C exception on NaN, infinity or a non-JSON type. Deployment target: macOS 26.
+
+## Parity guard
+
+- `cargo xtask parity` compares the reference's `DEFAULT_GROUPS` and the expressions its corpus runs (keyed as in `xtask/fuzz/patterns.mjs`, cached in `target/parity/`) with `microtypo-conformance --registry`: group order, title, classes, `preParse`, rule order, id, flags, description, requirements, kind, and each pattern's source as JavaScript spells it, flags and replacement. Escapes of characters from U+00A0 up are spelled out on both sides.
+- `xtask/parity/exceptions.mjs` lists each expected difference with its reason; an entry that no longer matches a difference is reported, so the list stays exact.
+
+## Fuzzing and benchmark
+
+- `fuzz`, `bench`, and `parity` export the reference at the pinned commit with `git show` into `target/reference/`, since its working tree may already behave differently. Build outputs come from `CARGO_TARGET_DIR` when set.
+- A pattern is an expression the reference executes, keyed by source and flags. `xtask/fuzz/patterns.mjs` wraps `RegExp.prototype.exec`, which every `String` and `RegExp` method taking a regex goes through, and folds expressions built at run time (placeholder ids, rule selectors, safe tag names, safe block delimiters, reserved-character substitutes) to one key each.
+- Each run indexes which corpus cases each pattern matches; the index is cached in `target/fuzz/` by reference commit and the hash of `patterns.mjs`. Generated cases draw from that index, from the shapes of the reference's `test/conformance/build.mjs`, and, for one seed in 100, from focused forms in `generate.mjs`. Case `i` of seed `s` depends on nothing else, so runs split across workers and reproduce exactly. A change to the generator keeps both coverage floors.
+- Cases over the time budget, whose two reference runs differ, or that the replay cannot represent are skipped; the known lone-surrogate divergence is counted apart.
+- `bench` interleaves three rounds over all points so background load spreads evenly; snapshots compare only from one machine.
 
 ## Reproducibility
 
