@@ -443,7 +443,13 @@ jobs:
           readback
           if [ ! -f "$stored" ]; then
             pnpm publish "$tarball" --registry "$REGISTRY" --no-git-checks
-            readback
+            for _ in {1..30}; do
+              readback
+              if [ -f "$stored" ]; then
+                break
+              fi
+              sleep 2
+            done
           fi
           if ! cmp -s "$tarball" "$stored"; then
             echo "::error::$PACKAGE ${REF#v} in GitHub Packages is not the released tarball"
