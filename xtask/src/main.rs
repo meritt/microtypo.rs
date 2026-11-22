@@ -26,7 +26,7 @@ const BINARYEN: &str = "133";
 
 const WASM_OPT_FLAGS: [&str; 3] = ["-Os", "--strip-debug", "--strip-producers"];
 
-const WASM_GZIP_BUDGET: u64 = 750_000;
+const WASM_GZIP_BUDGET: u64 = 800_000;
 
 const CORPUS_SOURCE: &str = "test/conformance/corpus.jsonl";
 const CORPUS: &str = "corpus.jsonl";
@@ -723,9 +723,15 @@ fn bench(args: &[&str]) -> Result {
     write(&points_path, &serde_json::to_string(&points).map_err(|e| e.to_string())?)?;
 
     run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-core", "--example", "profile"]))?;
+    let dist = wasm()?;
     let rust = samples(Command::new(target_dir().join("release/examples/profile")).arg("bench").arg(&points_path))?;
-    let js =
-        samples(Command::new("node").arg(root.join("xtask/bench/bench.mjs")).arg(&reference.dir).arg(&points_path))?;
+    let node = || {
+        let mut command = Command::new("node");
+        command.arg(root.join("xtask/bench/bench.mjs")).arg(&reference.dir).arg(&points_path);
+        command
+    };
+    let wasm_samples = samples(node().arg(dist.join("microtypo.js")))?;
+    let js = samples(&mut node())?;
 
     let mut rows = Vec::new();
     for point in &points {
@@ -745,7 +751,8 @@ fn bench(args: &[&str]) -> Result {
             let rank = |q: f64| values[((q * values.len() as f64).ceil() as usize).clamp(1, values.len()) - 1];
             Ok(json!({ "median_ms": rank(0.5), "p95_ms": rank(0.95), "samples": values.len() }))
         };
-        rows.push(json!({ "name": name, "rust": stats(&rust)?, "js": stats(&js)? }));
+        let wasm_stats = if wasm_samples.contains_key(name) { stats(&wasm_samples)? } else { Value::Null };
+        rows.push(json!({ "name": name, "rust": stats(&rust)?, "wasm": wasm_stats, "js": stats(&js)? }));
     }
 
     if named.contains_key("--json") {
@@ -765,19 +772,25 @@ fn bench(args: &[&str]) -> Result {
     }
 
     let ms = |row: &Value, side: &str, key: &str| row[side][key].as_f64().unwrap_or(f64::NAN);
+    let cell = |value: f64, digits: usize| {
+        if value.is_nan() { "-".to_owned() } else { format!("{value:.digits$}") }
+    };
     println!(
-        "{:<18} {:>11} {:>11} {:>11} {:>11} {:>8}",
-        "point", "rust median", "rust p95", "js median", "js p95", "rust/js"
+        "{:<18} {:>11} {:>11} {:>11} {:>11} {:>11} {:>11} {:>8} {:>8}",
+        "point", "rust median", "rust p95", "wasm median", "wasm p95", "js median", "js p95", "rust/js", "wasm/js"
     );
     for row in &rows {
         println!(
-            "{:<18} {:>11.4} {:>11.4} {:>11.4} {:>11.4} {:>8.2}",
+            "{:<18} {:>11.4} {:>11.4} {:>11} {:>11} {:>11.4} {:>11.4} {:>8.2} {:>8}",
             row["name"].as_str().unwrap_or_default(),
             ms(row, "rust", "median_ms"),
             ms(row, "rust", "p95_ms"),
+            cell(ms(row, "wasm", "median_ms"), 4),
+            cell(ms(row, "wasm", "p95_ms"), 4),
             ms(row, "js", "median_ms"),
             ms(row, "js", "p95_ms"),
             ms(row, "rust", "median_ms") / ms(row, "js", "median_ms"),
+            cell(ms(row, "wasm", "median_ms") / ms(row, "js", "median_ms"), 2),
         );
     }
     println!("milliseconds per call; reference {}", reference.commit);
@@ -851,24 +864,28 @@ fn compare(before: &Path, after: &Path, threshold: f64) -> Result {
     let load = |path: &Path| -> Result<Vec<(String, f64)>> {
         let snapshot: Value =
             serde_json::from_slice(&fs::read(path).map_err(at(path.display()))?).map_err(at(path.display()))?;
-        snapshot["points"]
-            .as_array()
-            .ok_or_else(|| format!("{} is not a bench snapshot", path.display()))?
-            .iter()
-            .map(|p| match (p["name"].as_str(), p["rust"]["median_ms"].as_f64()) {
-                (Some(name), Some(median)) => Ok((name.to_owned(), median)),
-                _ => Err(format!("{}: a point without a name or a Rust median", path.display())),
-            })
-            .collect()
+        let points =
+            snapshot["points"].as_array().ok_or_else(|| format!("{} is not a bench snapshot", path.display()))?;
+        let mut medians = Vec::new();
+        for point in points {
+            let (Some(name), Some(rust)) = (point["name"].as_str(), point["rust"]["median_ms"].as_f64()) else {
+                return Err(format!("{}: a point without a name or a Rust median", path.display()));
+            };
+            medians.push((format!("rust {name}"), rust));
+            if let Some(wasm) = point["wasm"]["median_ms"].as_f64() {
+                medians.push((format!("wasm {name}"), wasm));
+            }
+        }
+        Ok(medians)
     };
     let before = load(before)?;
     let after = load(after)?;
     let limit = 1.0 + threshold / 100.0;
     let mut worse = Vec::new();
-    println!("{:<18} {:>11} {:>11} {:>8}", "point", "before", "after", "ratio");
+    println!("{:<24} {:>11} {:>11} {:>8}", "point", "before", "after", "ratio");
     for (name, now) in &after {
         let Some((_, was)) = before.iter().find(|(n, _)| n == name) else {
-            println!("{name:<18} {:>11} {now:>11.4} {:>8}", "-", "-");
+            println!("{name:<24} {:>11} {now:>11.4} {:>8}", "-", "-");
             continue;
         };
         let ratio = now / was;
@@ -878,9 +895,9 @@ fn compare(before: &Path, after: &Path, threshold: f64) -> Result {
         } else {
             ""
         };
-        println!("{name:<18} {was:>11.4} {now:>11.4} {ratio:>8.3}{mark}");
+        println!("{name:<24} {was:>11.4} {now:>11.4} {ratio:>8.3}{mark}");
     }
-    println!("Rust median, milliseconds per call; threshold {threshold}%");
+    println!("Rust and wasm medians, milliseconds per call; threshold {threshold}%");
     if worse.is_empty() {
         Ok(())
     } else {

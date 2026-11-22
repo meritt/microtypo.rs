@@ -1,11 +1,15 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { reference } from '../fuzz/common.mjs';
 
 const ROUNDS = 3;
 
-const [refDir, pointsPath] = process.argv.slice(2);
-const { MicroTypo } = await reference(refDir, 'src/index.js');
-const points = JSON.parse(readFileSync(pointsPath, 'utf8'));
+const [refDir, pointsPath, wasmPath] = process.argv.slice(2);
+const { MicroTypo } = wasmPath
+  ? await (await import(pathToFileURL(wasmPath).href)).load()
+  : await reference(refDir, 'src/index.js');
+const allPoints = JSON.parse(readFileSync(pointsPath, 'utf8'));
+const points = wasmPath ? allPoints.filter((point) => point.op !== 'new') : allPoints;
 let sink;
 
 function measure(op) {

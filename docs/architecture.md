@@ -92,8 +92,8 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 
 ## WebAssembly package
 
-- `cargo xtask wasm` builds with the `wasm` profile (`opt-level = "z"`), runs `wasm-bindgen --target web`, renames the glue's default module URL to `microtypo.wasm` so bundlers following `new URL(…, import.meta.url)` find it, and runs `wasm-opt -Os --strip-debug --strip-producers` (`-Oz` comes out larger). `dist` fails above 750 000 bytes of `gzip -9` (`WASM_GZIP_BUDGET`).
-- `.cargo/config.toml` enables `simd128` for `wasm32-unknown-unknown`, which rustc does not turn on by default. `opt-level = "z"` leaves the portable block scan of the regress prefilter scalar, so `range_bits` has an explicit SIMD form on that target.
+- `cargo xtask wasm` builds with the `wasm` profile (`opt-level = "z"`, and `2` for regress, where a search spends its time), runs `wasm-bindgen --target web`, renames the glue's default module URL to `microtypo.wasm` so bundlers following `new URL(…, import.meta.url)` find it, and runs `wasm-opt -Os --strip-debug --strip-producers` (`-Oz` comes out larger). `dist` fails above 800 000 bytes of `gzip -9` (`WASM_GZIP_BUDGET`).
+- `.cargo/config.toml` enables `simd128` for `wasm32-unknown-unknown`, which rustc does not turn on by default. The compiler leaves the portable block scan of the regress prefilter scalar on that target even at `opt-level = 3`, so `range_bits` has an explicit SIMD form there.
 - `microtypo.js` exports only `load`. The glue holds one instance per realm: the first successful `load()` instantiates and later calls return the same API without reading their argument; a failed load is not kept. A module reporting another version stays in the glue, so every later `load()` in that realm rejects with `ERR_MICROTYPO_VERSION`. The export check before `initSync` keeps a module from another build out of the glue.
 - `load()` calls `initSync` with a compiled module, never the streaming init; a `file:` URL is read with `node:fs`. `microtypo.js` targets Baseline Newly available and has no capability checks.
 - `onCycleLimit` runs after the pass, since JavaScript called mid-pass could reenter the engine. The cycle hook is set only for a call made while `onCycleLimit` is a function, as the reference reads it at the start of `process`: a set hook turns off the requirements skip, which moves trace ranges.
@@ -129,7 +129,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - A pattern is an expression the reference executes, keyed by source and flags. `xtask/fuzz/patterns.mjs` wraps `RegExp.prototype.exec`, which every `String` and `RegExp` method taking a regex goes through, and folds expressions built at run time (placeholder ids, rule selectors, safe tag names, safe block delimiters, reserved-character substitutes) to one key each.
 - Each run indexes which corpus cases each pattern matches; the index is cached in `target/fuzz/` by reference commit and the hash of `patterns.mjs`. Generated cases draw from that index, from the shapes of the reference's `test/conformance/build.mjs`, and, for one seed in 100, from focused forms in `generate.mjs`. Case `i` of seed `s` depends on nothing else, so runs split across workers and reproduce exactly. A change to the generator keeps both coverage floors.
 - Cases over the time budget, whose two reference runs differ, or that the replay cannot represent are skipped; the known lone-surrogate divergence is counted apart.
-- `bench` interleaves three rounds over all points so background load spreads evenly; snapshots compare only from one machine.
+- `bench` interleaves three rounds over all points so background load spreads evenly; snapshots compare only from one machine. The wasm package leaves out the `new` points: its engines are freed by a `FinalizationRegistry`, which does not run inside a synchronous loop, so they would pile up in linear memory.
 
 ## Reproducibility
 

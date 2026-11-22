@@ -286,8 +286,8 @@ fn range_bits(block: &[u16; BLOCK], (first, span): (u16, u16)) -> u64 {
 }
 
 /// \return one bit for each unit of \p block in the range of \p first and the \p span units
-/// after it, the first unit in the lowest bit. A size-optimized wasm build does not vectorize
-/// the portable loop.
+/// after it, the first unit in the lowest bit. The compiler does not vectorize the portable
+/// loop for wasm.
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 #[inline(always)]
 fn range_bits(block: &[u16; BLOCK], (first, span): (u16, u16)) -> u64 {

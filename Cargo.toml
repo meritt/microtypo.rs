@@ -56,3 +56,6 @@ codegen-units = 1
 [profile.wasm]
 inherits = "release"
 opt-level = "z"
+
+[profile.wasm.package.regress]
+opt-level = 2
