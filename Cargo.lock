@@ -524,6 +524,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "regress",
  "serde_json",
 ]
 

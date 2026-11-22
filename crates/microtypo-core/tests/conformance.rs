@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use microtypo_conformance::{Json, Replay, quoted, replay};
+use microtypo_core::internals::{builtins, generated, interpreted};
 
 fn corpus_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("MICROTYPO_CORPUS") {
@@ -70,4 +72,23 @@ fn conformance_corpus() {
         eprintln!("  {}", f.chars().take(600).collect::<String>());
     }
     assert!(failures.is_empty(), "{} cases differ from the reference; see {}", failures.len(), report.display());
+    census(only.is_none() && std::env::var_os("MICROTYPO_CORPUS").is_none());
+}
+
+fn census(whole_corpus: bool) {
+    let recorded: BTreeSet<(String, String)> = builtins().into_iter().collect();
+    let listed: BTreeSet<(String, String)> = generated()
+        .iter()
+        .map(|&(source, flags, ..)| (source.to_owned(), flags.to_owned()))
+        .chain(interpreted().iter().map(|&(source, flags, _)| (source.to_owned(), flags.to_owned())))
+        .collect();
+    let missing: Vec<_> = recorded.difference(&listed).collect();
+    assert!(missing.is_empty(), "built-in patterns without a matcher, run `cargo xtask matchers`: {missing:?}");
+    let unexplained: Vec<_> = interpreted().iter().filter(|&&(_, _, reason)| reason.is_empty()).collect();
+    assert!(unexplained.is_empty(), "interpreted built-in patterns without a reason: {unexplained:?}");
+    if whole_corpus {
+        let unused: Vec<_> = listed.difference(&recorded).collect();
+        assert!(unused.is_empty(), "matchers for patterns no built-in uses, run `cargo xtask matchers`: {unused:?}");
+        assert_eq!(generated().len() + interpreted().len(), recorded.len(), "matchers are listed once per pattern");
+    }
 }

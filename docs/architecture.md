@@ -20,7 +20,9 @@ flowchart LR
   conformance[microtypo-conformance] --> core
   swift[packages/swift] --> ffi
   npm[packages/npm] --> wasm
+  xtask -.->|codegen| regress
   xtask -.->|cbindgen| ffi
+  xtask -.->|runs| conformance
 ```
 
 | Part | Role |
@@ -28,13 +30,13 @@ flowchart LR
 | `crates/microtypo-core` | engine: rules, input formats, markup protection, budgets; `forbid(unsafe_code)` |
 | `crates/microtypo-ffi` | C ABI, header in `include/microtypo.h`; the only workspace crate with `unsafe` |
 | `crates/microtypo-wasm` | `wasm-bindgen` boundary |
-| `crates/microtypo-conformance` | replays corpus cases against the core for the conformance test |
+| `crates/microtypo-conformance` | replays corpus cases against the core for the conformance test and, as a JSONL filter, for `matchers` |
 | `packages/npm` | `@meritt/microtypo-wasm`: JavaScript API over the module |
 | `packages/swift`, `Package.swift` | Swift package `MicroTypo` over the XCFramework |
-| `vendor/regress` | ECMAScript regex engine over UTF-16, prefilter |
-| `xtask` | header, builds, release set, corpus copy |
+| `vendor/regress` | ECMAScript regex engine over UTF-16, prefilter, matcher generator |
+| `xtask` | header, builds, release set, corpus copy, matcher generation |
 
-Bindings depend on no workspace crate but the core. Core tests are `tests/behaviour` (library behaviour), `tests/growth` (linear scaling and timing) and `tests/conformance.rs`.
+Bindings depend on no workspace crate but the core. Core tests are `tests/behaviour` (library behaviour), `tests/growth` (linear scaling and timing), `tests/conformance.rs` and `tests/matchers.rs`.
 
 ## Core
 
@@ -42,7 +44,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - Text is `JsString` (UTF-16 units); lone surrogates survive everywhere, including rule-group names, rule ids, trace names and cycle-hook ids, which have one canonical UTF-16 form that metadata JSON quotes without replacement.
 - `js` reproduces the JavaScript semantics the engine relies on: ECMAScript regexes, `JSON.parse`/`JSON.stringify` with V8 error messages, insertion-ordered config objects.
 - One `Error`; `ErrorKind` is `Config`, `Input`, `Budget` or `Type` (`MicroTypoConfigError`, `MicroTypoInputError`, `MicroTypoBudgetError`, `TypeError`). Bindings map it without changing fields.
-- Limits: `maxInputLength` (default 30 000 units) before processing; `maxProcessingMs` at the reference's check points (between stages, after each rule, pre-parse hook and cycle iteration, after restoration) and inside regex searches; `MAX_ENTRIES` (100 000) per vault. The interpreter reads the clock once per 65 536 backtracking steps; past the budget the search fails and its later attempts fail, and the next stage check raises `MicroTypoBudgetError` with that stage's label. The sequence scanners in `protect/sequences.rs` check the same budget state every 65 536 units.
+- Limits: `maxInputLength` (default 30 000 units) before processing; `maxProcessingMs` at the reference's check points (between stages, after each rule, pre-parse hook and cycle iteration, after restoration) and inside regex searches; `MAX_ENTRIES` (100 000) per vault. The interpreter and the generated matchers read the clock once per 65 536 backtracking steps; past the budget the search fails and its later attempts fail, and the next stage check raises `MicroTypoBudgetError` with that stage's label. The sequence scanners in `protect/sequences.rs` check the same budget state every 65 536 units.
 - The core performs no I/O. Its two effects, the clock and the random bytes, come from the `Host` each constructor takes: two plain functions, so the regex budget can keep the clock in a thread-local. The final binary picks the `getrandom` backend and the allocator. Each binding tests that a catastrophic input ends with `MicroTypoBudgetError`.
 - Placeholders of vaulted URLs, addresses, tokens and tags carry a nonce from the host's CSPRNG, drawn from a 256-byte pool filled on the first `process` call that needs one, never at construction. A host without entropy panics rather than mint a guessable nonce. Placeholder-shaped text is stripped on entry, and a custom group's output holds no placeholder token more often than its input.
 - A builtin rule declares the characters (`requires`, `requiresAny`) and expression (`requiresPattern`) its text must contain, as `lib/rule-features.js`. While every registered group is builtin and no cycle hook is set, the runner skips a rule whose text lacks them, and a structured value skips the pipeline as `canSkipValue` decides (after one budget check labelled `data-value`). The skip is observable: a rule that runs on a run with nothing to lift still settles the lifting and records a trace event, which moves later trace ranges.
@@ -67,7 +69,16 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - `Re` constructors and the matcher generator enter the regress parser with UTF-16 source: legacy atoms are units, `u`/`v` atoms are code points, named groups always use the Unicode identifier grammar.
 - `v` follows the pinned Node.js V8, including its quirks: under `i` a one-code-point `\q{}` string keeps only its folded code point, while longer strings match ignoring case.
 - regress reads a prefilter off every compiled expression, including those built at run time: start, second-unit, preceding-unit and required unit sets, required strings, and runs a match must lie in. Every check is a necessary condition, so it skips positions without changing the match found; a construct the analysis does not understand widens its set to every unit, which turns that check off. Restricting a search to runs narrows the starts only: the matcher always gets the whole input, since a lookbehind can read before a run.
-- In a debug build a search the prefilter rules out runs anyway and panics on a match, and a search kept to runs is repeated over the rest of the input and must agree. The conformance tests run that way.
+- The required strings come from an analysis of the IR whose cost grows with the alternations it combines, so it stays off the path of a constructor for built-in expressions: `cargo xtask matchers` runs it on each of them without a limit and writes its outcome, strings or none, into `FACTOR_DATA` in `matchers.rs`, which `compile` hands to regress (`FactorSource::Given`). The last column of `MATCHERS` and of `INTERPRETED_FACTORS` is where a pattern's outcome starts; offset 0 holds a count of no strings. `INTERPRETED_FACTORS` repeats the patterns of `INTERPRETED` so that the reasons, which only the tests read, stay out of the binary. The runs a match must lie in come from the expression in one pass, so they are not written out. An expression built at run time is analysed within `FactorSource::WORK` and goes without required strings past it, which leaves its matches the same.
+- In a debug build a search the prefilter rules out runs anyway and panics on a match, and a search kept to runs is repeated over the rest of the input and must agree. The conformance and matcher tests run that way.
+
+## Generated matchers
+
+- Built-in expressions run as Rust functions generated from regress bytecode into `crates/microtypo-core/src/js/regex/matchers.rs`; the prefilter still picks start positions and the function replaces the interpreter's attempt. `compile` attaches a matcher to any expression whose source and flags are in the table; flags differing only in `g` or `y` share one function.
+- `Re::new` records an expression as built-in and is only for patterns from code (including ones assembled from constants). Expressions from configuration, user rules, safe tags and blocks, or holding an input-derived placeholder id use `Re::configured` or `Re::try_new` and are not recorded.
+- The table is the set the interpreter reaches on the corpus (`microtypo-conformance --patterns`). The conformance test fails when a reached built-in has no entry or an interpreted one has no reason, and, over the whole corpus, when an entry is unused.
+- The generator rejects a matcher over 5 000 bytes of unformatted source (`MATCHER_SOURCE_LIMIT`), which keeps the wasm under its gzip budget: the long word and unit alternations and the URL expression stay on the interpreter. The entity table of `clear_special` is no expression: a direct search tries a numeric character reference, then the table's spellings longest first.
+- `tests/matchers.rs` compares every generated matcher with the interpreter on generated and corpus inputs, including bytecode walks and strings crossing the 64- and 128-unit prefilter block bounds; matches, positions and groups must agree.
 
 ## C ABI
 

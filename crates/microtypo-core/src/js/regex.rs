@@ -1,7 +1,10 @@
+mod matchers;
+
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use super::{JsString, is_high, is_low};
@@ -17,6 +20,7 @@ pub struct Re {
     #[doc(hidden)]
     pub unicode: bool,
     named: bool,
+    builtin: bool,
 }
 
 struct Compiled {
@@ -24,6 +28,7 @@ struct Compiled {
     source: String,
     source_units: Option<JsString>,
     flags: String,
+    builtin: AtomicBool,
 }
 
 impl std::fmt::Debug for Compiled {
@@ -128,6 +133,7 @@ impl Re {
             source: display,
             source_units: Some(source.to_vec()),
             flags: flags.into(),
+            builtin: AtomicBool::new(false),
         })))
     }
 
@@ -138,6 +144,7 @@ impl Re {
             sticky: flags.contains('y'),
             unicode: flags.contains('u') || flags.contains('v'),
             named: inner.source.contains("(?<") && has_named_group(&inner.source),
+            builtin: false,
             inner,
         }
     }
@@ -168,7 +175,11 @@ impl Re {
 #[doc(hidden)]
 impl Re {
     pub fn new(source: &str, flags: &str) -> Re {
-        Re::configured(source, flags)
+        let re = Re::configured(source, flags);
+        if !re.inner.builtin.swap(true, Ordering::Relaxed) {
+            BUILTINS.lock().unwrap_or_else(PoisonError::into_inner).insert((source.to_owned(), flags.to_owned()));
+        }
+        Re { builtin: true, ..re }
     }
 
     pub fn configured(source: &str, flags: &str) -> Re {
@@ -179,6 +190,8 @@ impl Re {
     pub fn with_flags(&self, flags: &str) -> Re {
         if let Some(source) = &self.inner.source_units {
             Re::try_new_utf16(source, flags).expect("validated pattern with global flag")
+        } else if self.builtin {
+            Re::new(self.source(), flags)
         } else {
             Re::configured(self.source(), flags)
         }
@@ -446,6 +459,20 @@ pub fn out_of_budget() -> bool {
 static COMPILED: LazyLock<Mutex<HashMap<String, Vec<Arc<Compiled>>>>> = LazyLock::new(Default::default);
 const COMPILED_LIMIT: usize = 4096;
 
+static BUILTINS: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+
+pub fn builtins() -> Vec<(String, String)> {
+    BUILTINS.lock().unwrap_or_else(PoisonError::into_inner).iter().cloned().collect()
+}
+
+pub fn generated() -> &'static [(&'static str, &'static str, regress::aot::Attempt, u32)] {
+    matchers::MATCHERS
+}
+
+pub fn interpreted() -> &'static [(&'static str, &'static str, &'static str)] {
+    matchers::INTERPRETED
+}
+
 fn compile(source: &str, flags: &str) -> Result<Arc<Compiled>, RegexSyntaxError> {
     let cached = |compiled: &HashMap<String, Vec<Arc<Compiled>>>| {
         compiled.get(source).and_then(|variants| variants.iter().find(|c| c.flags == flags).cloned())
@@ -453,9 +480,32 @@ fn compile(source: &str, flags: &str) -> Result<Arc<Compiled>, RegexSyntaxError>
     if let Some(c) = cached(&COMPILED.lock().unwrap_or_else(PoisonError::into_inner)) {
         return Ok(c);
     }
-    let regex = regress::Regex::from_utf16(&source.encode_utf16().collect::<Vec<_>>(), flags)
+    let matcher = matchers::MATCHERS
+        .binary_search_by(|&(s, f, ..)| (s, f).cmp(&(source, flags)))
+        .ok()
+        .map(|i| matchers::MATCHERS[i]);
+    let factors = match matcher {
+        Some((.., at)) => Some(at),
+        None => matchers::INTERPRETED_FACTORS
+            .binary_search_by(|&(s, f, _)| (s, f).cmp(&(source, flags)))
+            .ok()
+            .map(|i| matchers::INTERPRETED_FACTORS[i].2),
+    };
+    let factors = factors.map_or_else(regress::FactorSource::default, |at| {
+        regress::FactorSource::Given(regress::aot::Factors(&matchers::FACTOR_DATA[at as usize..]))
+    });
+    let mut regex = regress::Regex::from_utf16_with(&super::u(source), flags, factors)
         .map_err(|e| syntax_error(source, flags, e))?;
-    let c = Arc::new(Compiled { regex, source: source.to_owned(), source_units: None, flags: flags.to_owned() });
+    if let Some((_, _, attempt, _)) = matcher {
+        regex.set_attempt(attempt);
+    }
+    let c = Arc::new(Compiled {
+        regex,
+        source: source.to_owned(),
+        source_units: None,
+        flags: flags.to_owned(),
+        builtin: AtomicBool::new(false),
+    });
     let mut compiled = COMPILED.lock().unwrap_or_else(PoisonError::into_inner);
     if compiled.len() >= COMPILED_LIMIT {
         compiled.clear();

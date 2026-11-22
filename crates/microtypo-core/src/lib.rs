@@ -53,6 +53,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod internals {
     pub use crate::js::escape;
     pub use crate::js::raw_json::{Node as JsonNode, RawJson};
+    pub use crate::js::regex::{builtins, generated, interpreted};
     pub use crate::js::regex::{out_of_budget, with_budget};
     pub use crate::rules::registry::default_groups;
     pub use crate::shared::diff::replacement_edits;

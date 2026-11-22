@@ -5,7 +5,7 @@ Rust port of [microtypo](https://github.com/meritt/microtypo). Output, `changes`
 ## Rules
 
 - Port reference behaviour; never redesign a typography rule here.
-- A module mirrors the reference file of the same path (`src/lib/` maps to `shared`) in its rule definitions and scanners; how patterns execute (`vendor/regress`, the prefilter, required strings) is the port's own.
+- A module mirrors the reference file of the same path (`src/lib/` maps to `shared`) in its rule definitions and scanners; how patterns execute (`vendor/regress`, the prefilter, required strings, generated matchers) is the port's own.
 - Tests cover library behaviour and performance only.
 - No comments in code beyond rustdoc on public items and the `SAFETY:` notes and `# Safety` sections clippy requires; constraints go to `docs/architecture.md`.
 - Commit messages: one line, Russian, capitalised.
@@ -31,6 +31,7 @@ CARGO_BUILD_WARNINGS=deny cargo clippy -p microtypo-core -p microtypo-wasm --loc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo xtask header --check
 cargo xtask corpus --check
+cargo xtask matchers --check
 cargo deny --locked check
 cargo test --workspace --locked
 cargo +nightly-2026-11-20 miri test -p microtypo-ffi --no-default-features --lib --locked
@@ -51,13 +52,14 @@ cargo xtask corpus ../microtypo
 
 ```bash
 cargo xtask header
+cargo xtask matchers
 cargo xtask wasm
 cargo xtask xcframework
 cargo xtask dist [<empty dir>]
 cargo xtask pin [--check] [<release set>]
 ```
 
-`dist` builds the release set and installs each package as a consumer would; `pin` points `Package.swift` at the set's XCFramework.
+`matchers` regenerates `crates/microtypo-core/src/js/regex/matchers.rs`, the Rust matchers of the built-in regular expressions; run it after changing a built-in pattern or `vendor/regress`. `dist` builds the release set and installs each package as a consumer would; `pin` points `Package.swift` at the set's XCFramework.
 
 ## Release
 

@@ -1,4 +1,5 @@
-use std::fmt::Display;
+use std::collections::HashMap;
+use std::fmt::{Display, Write as _};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use std::{env, fs};
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage: cargo xtask header [--check] | wasm | xcframework | dist [<dir>] \
-                     | pin [--check] [<dir>] | corpus [--check] [<src>]";
+                     | pin [--check] [<dir>] | corpus [--check] [<src>] | matchers [--check]";
 
 const RELEASES: &str = "https://github.com/meritt/microtypo.rs/releases/download";
 
@@ -21,6 +22,13 @@ const WASM_GZIP_BUDGET: u64 = 750_000;
 const CORPUS_SOURCE: &str = "test/conformance/corpus.jsonl";
 const CORPUS: &str = "corpus.jsonl";
 const CORPUS_PIN: &str = "testdata/conformance/corpus.sha256";
+
+const MATCHERS: &str = "crates/microtypo-core/src/js/regex/matchers.rs";
+
+const MATCHER_SOURCE_LIMIT: usize = 5_000;
+
+const MATCHERS_LINTS: &str =
+    "#![allow(clippy::all, clippy::pedantic, unused_labels, unused_mut, unused_variables, unreachable_code)]";
 
 const MACOS: &str = "26.0";
 
@@ -48,6 +56,8 @@ fn main() -> ExitCode {
         ["corpus", "--check"] => corpus(true, None),
         ["corpus", "--check", src] => corpus(true, Some(Path::new(src))),
         ["corpus", src] => corpus(false, Some(Path::new(src))),
+        ["matchers"] => matchers(false),
+        ["matchers", "--check"] => matchers(true),
         _ => Err(USAGE.to_owned()),
     };
     match result {
@@ -210,8 +220,139 @@ fn corpus(check: bool, src: Option<&Path>) -> Result {
     Ok(())
 }
 
+fn matchers(check: bool) -> Result {
+    let path = root().join(MATCHERS);
+    if check {
+        return generate_matchers(&path, true);
+    }
+    let previous = fs::read(&path).ok();
+    write(&path, matchers_file(&[], &[], &[], "")?.as_bytes())?;
+    let generated = std::panic::catch_unwind(|| generate_matchers(&path, false))
+        .unwrap_or_else(|_| Err("the matcher generator panicked".to_owned()));
+    if generated.is_err()
+        && let Some(previous) = previous
+    {
+        write(&path, &previous)?;
+    }
+    generated
+}
+
+fn generate_matchers(path: &Path, check: bool) -> Result {
+    let root = root();
+    run(cargo().args(["build", "--release", "--locked", "-p", "microtypo-conformance"]))?;
+    let corpus_path = root.join("testdata/conformance").join(CORPUS);
+    let corpus = fs::File::open(&corpus_path).map_err(at(corpus_path.display()))?;
+    let listing = capture(Command::new(conformance()).arg("--patterns").stdin(corpus))?;
+    let mut patterns = Vec::new();
+    for line in listing.lines() {
+        let pattern: Value = serde_json::from_str(line).map_err(at(line))?;
+        match (pattern[0].as_str(), pattern[1].as_str()) {
+            (Some(source), Some(flags)) => patterns.push((source.to_owned(), flags.to_owned())),
+            _ => return Err(format!("microtypo-conformance --patterns printed {line}")),
+        }
+    }
+    patterns.sort();
+
+    let mut codegen = regress::codegen::Codegen::new();
+    let (mut generated, mut interpreted, mut code) = (Vec::new(), Vec::new(), String::new());
+    let mut factor_data = vec![0u8];
+    let mut factor_bytes_at: HashMap<Vec<u8>, u32> = HashMap::new();
+    let mut attempts: HashMap<(String, String), (u32, std::result::Result<String, String>)> = HashMap::new();
+    let mut functions = 0;
+    for (source, flags) in patterns {
+        let attempt = (source.clone(), flags.replace(['g', 'y'], ""));
+        if !attempts.contains_key(&attempt) {
+            let units: Vec<u16> = source.encode_utf16().collect();
+            let regex =
+                regress::Regex::from_utf16_with(&units, flags.as_str(), regress::FactorSource::Analyze(usize::MAX))
+                    .map_err(at(format!("/{source}/{flags}")))?;
+            let factors = match regress::codegen::Codegen::factors(&regex) {
+                Some(bytes) => {
+                    let fresh = u32::try_from(factor_data.len()).map_err(|e| e.to_string())?;
+                    *factor_bytes_at.entry(bytes).or_insert_with_key(|bytes| {
+                        factor_data.extend_from_slice(bytes);
+                        fresh
+                    })
+                }
+                None => 0,
+            };
+            let name = format!("m{functions}");
+            let shared = codegen.clone();
+            let outcome = match codegen.matcher(&regex, &name, flags.contains('u') || flags.contains('v')) {
+                Ok(matcher) if matcher.len() > MATCHER_SOURCE_LIMIT => {
+                    codegen = shared;
+                    Err(format!("{} bytes of source, over {MATCHER_SOURCE_LIMIT}", matcher.len()))
+                }
+                Ok(matcher) => {
+                    code.push_str(&matcher);
+                    functions += 1;
+                    Ok(name)
+                }
+                Err(reason) => {
+                    codegen = shared;
+                    Err(reason)
+                }
+            };
+            attempts.insert(attempt.clone(), (factors, outcome));
+        }
+        match &attempts[&attempt] {
+            (factors, Ok(name)) => generated.push((source, flags, name.clone(), *factors)),
+            (factors, Err(reason)) => interpreted.push((source, flags, reason.clone(), *factors)),
+        }
+    }
+    code.push_str(&codegen.classes());
+    let fresh = matchers_file(&generated, &interpreted, &factor_data, &code)?;
+    if check {
+        if fs::read_to_string(path).map_err(at(path.display()))? != fresh {
+            return Err(format!("{MATCHERS} is stale: run `cargo xtask matchers`"));
+        }
+    } else {
+        write(path, &fresh)?;
+    }
+    println!("{MATCHERS}: {} generated, {} interpreted", generated.len(), interpreted.len());
+    for (source, flags, reason, _) in &interpreted {
+        println!("  /{source}/{flags}: {reason}");
+    }
+    Ok(())
+}
+
+fn matchers_file(
+    generated: &[(String, String, String, u32)],
+    interpreted: &[(String, String, String, u32)],
+    factor_data: &[u8],
+    code: &str,
+) -> Result<String> {
+    let mut text = format!(
+        "{MATCHERS_LINTS}\n\nuse regress::aot;\n\npub(super) static MATCHERS: &[(&str, &str, aot::Attempt, u32)] = &[\n"
+    );
+    text.extend(generated.iter().map(|(source, flags, name, at)| format!("({source:?}, {flags:?}, {name}, {at}),\n")));
+    text.push_str("];\n\npub(super) static INTERPRETED: &[(&str, &str, &str)] = &[\n");
+    text.extend(interpreted.iter().map(|(source, flags, reason, _)| format!("({source:?}, {flags:?}, {reason:?}),\n")));
+    text.push_str("];\n\npub(super) static INTERPRETED_FACTORS: &[(&str, &str, u32)] = &[\n");
+    text.extend(interpreted.iter().map(|(source, flags, _, at)| format!("({source:?}, {flags:?}, {at}),\n")));
+    text.push_str("];\n\n");
+    let bytes: Vec<String> = factor_data.iter().map(u8::to_string).collect();
+    let _ = writeln!(text, "pub(super) static FACTOR_DATA: &[u8] = &[{}];\n", bytes.join(", "));
+    text.push_str(code);
+    let mut command = Command::new(tool("RUSTFMT", None, "rustfmt"));
+    command.args(["--edition", "2024", "--emit", "stdout"]).current_dir(root());
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().map_err(at(show(&command)))?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
+    let output = child.wait_with_output().map_err(at(show(&command)))?;
+    writer.join().expect("writer finished").map_err(at(show(&command)))?;
+    if !output.status.success() {
+        return Err(format!("{} failed: {}", show(&command), output.status));
+    }
+    String::from_utf8(output.stdout).map_err(at(show(&command)))
+}
+
 fn target_dir() -> PathBuf {
     env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), |dir| root().join(dir))
+}
+
+fn conformance() -> PathBuf {
+    target_dir().join("release/microtypo-conformance")
 }
 
 fn xcframework() -> Result<PathBuf> {

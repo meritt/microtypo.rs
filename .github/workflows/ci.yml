@@ -57,6 +57,7 @@ jobs:
         run: |
           cargo xtask header --check
           cargo xtask corpus --check
+          cargo xtask matchers --check
 
       - name: Install
         env:
