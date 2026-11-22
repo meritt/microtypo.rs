@@ -7,14 +7,27 @@
 ```toml
 [dependencies]
 microtypo-core = { git = "https://github.com/meritt/microtypo.rs", tag = "v0.1.0" }
+getrandom = "0.4"
+serde_json = "1"
 ```
 
+Часы для `maxProcessingMs` и случайные байты движок берёт у вызывающего кода через `Host`.
+
 ```rust
-use microtypo_core::MicroTypo;
+use std::sync::LazyLock;
+use std::time::Instant;
+
+use microtypo_core::{Host, MicroTypo};
 use serde_json::json;
 
-let mut typo = MicroTypo::new(Some(&json!({ "html": false })))?;
-assert_eq!(typo.process_str("\"Амбер\" - город")?, "«Амбер»\u{a0}— город");
+static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+let host = Host {
+    now_ms: || START.elapsed().as_secs_f64() * 1000.0,
+    fill_random: |bytes| getrandom::fill(bytes).expect("системный CSPRNG доступен"),
+};
+let mut typo = MicroTypo::new(Some(&json!({ "html": false })), host)?;
+assert_eq!(typo.process("\"Амбер\" - город")?, "«Амбер»\u{a0}— город");
 ```
 
 ## JavaScript

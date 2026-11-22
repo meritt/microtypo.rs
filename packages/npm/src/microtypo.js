@@ -79,9 +79,7 @@ const notJson = (value) =>
   typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint';
 
 function toJson(value) {
-  return JSON.stringify(value, (_, v) =>
-    typeof v === 'string' ? v.toWellFormed() : notJson(v) ? null : v
-  );
+  return JSON.stringify(value, (_, v) => notJson(v) ? null : v);
 }
 
 function checkConfig(config) {
@@ -98,22 +96,18 @@ function checkConfig(config) {
 }
 
 function readProcessOptions(options) {
-  const changes =
-    options !== null && typeof options === 'object' && Object.hasOwn(options, 'changes')
-      ? options.changes
-      : undefined;
-
-  if (changes === undefined) {
-    return false;
+  const result = {};
+  for (const option of ['changes', 'edits', 'trace']) {
+    const value = options !== null && typeof options === 'object' && Object.hasOwn(options, option)
+      ? options[option] : undefined;
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw new MicroTypoConfigError(`process() option "${option}" must be a boolean`, {
+        details: { option, receivedType: typeof value }
+      });
+    }
+    result[option] = value === true;
   }
-
-  if (typeof changes !== 'boolean') {
-    throw new MicroTypoConfigError('process() option "changes" must be a boolean', {
-      details: { option: 'changes', receivedType: typeof changes }
-    });
-  }
-
-  return changes;
+  return result;
 }
 
 function freezeGroup(group) {
@@ -146,14 +140,22 @@ class MicroTypo {
     return this;
   }
 
-  registerRuleGroup() {
-    throw new TypeError(
-      'registerRuleGroup: a rule group is JavaScript code, which the wasm engine cannot run'
-    );
+  registerRuleGroup(group, options) {
+    if (typeof group?.preParse === 'function' || (Array.isArray(group?.rules) && group.rules.some((rule) =>
+      typeof rule?.handler === 'function' ||
+      typeof rule?.replacement === 'function' ||
+      (Array.isArray(rule?.replacement) && rule.replacement.some((value) => typeof value === 'function')) ||
+      (Array.isArray(rule?.pattern) ? rule.pattern : [rule?.pattern]).some((pattern) => pattern instanceof RegExp)
+    ))) {
+      throw new TypeError(
+        'registerRuleGroup: a rule group is JavaScript code, which the wasm engine cannot run'
+      );
+    }
+    return this.#call('registerRuleGroup', options === undefined ? [group] : [group, options]);
   }
 
   getRuleGroup(name) {
-    const json = name ? this.#engine.ruleGroup(String(name)) : undefined;
+    const json = name ? this.#engine.ruleGroup(toUnits(String(name))) : undefined;
 
     return json === undefined ? undefined : freezeGroup(JSON.parse(json));
   }
@@ -257,7 +259,7 @@ class MicroTypo {
       });
     }
 
-    const withChanges = readProcessOptions(options);
+    const diagnostics = readProcessOptions(options);
 
     if (this.#processing) {
       throw new MicroTypoInputError(
@@ -274,7 +276,8 @@ class MicroTypo {
 
     try {
       try {
-        units = this.#engine.process(toUnits(text), withChanges);
+        this.#engine.setCycleHook(hook !== undefined);
+        units = this.#engine.process(toUnits(text), diagnostics.changes, diagnostics.edits, diagnostics.trace);
       } catch (error) {
         failure = { error: lift(error) };
       }
@@ -292,20 +295,10 @@ class MicroTypo {
       throw failure.error;
     }
 
-    const result = fromUnits(units);
-
-    if (!withChanges) {
-      return result;
+    if (diagnostics.changes || diagnostics.edits || diagnostics.trace) {
+      return JSON.parse(this.#engine.takeDiagnostics());
     }
-
-    const flat = this.#engine.takeChanges();
-    const changes = [];
-
-    for (let i = 0; i < flat.length; i += 2) {
-      changes.push([flat[i], flat[i + 1]]);
-    }
-
-    return { text: result, changes };
+    return fromUnits(units);
   }
 
   free() {

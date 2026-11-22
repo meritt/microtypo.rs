@@ -3,6 +3,7 @@ use crate::js::{self, Re};
 use crate::rule_runner::{Replacement, Rule, RuleGroupDef};
 
 use super::span;
+use crate::shared::rule_features::F;
 
 pub fn opt_align_group() -> RuleGroupDef {
     super::group(
@@ -37,7 +38,8 @@ pub fn opt_align_group() -> RuleGroupDef {
             )
             .describe("Оптическое выравнивание открывающей кавычки")
             .off()
-            .html_only(),
+            .html_only()
+            .requires(F::QUOTE),
             Rule::patterns(
                 "bracket",
                 vec![
@@ -57,7 +59,8 @@ pub fn opt_align_group() -> RuleGroupDef {
             )
             .describe("Оптическое выравнивание скобок")
             .off()
-            .html_only(),
+            .html_only()
+            .requires(F::PAREN),
         ],
     )
 }

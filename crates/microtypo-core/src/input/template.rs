@@ -1,12 +1,16 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use serde_json::json;
 
 use crate::errors::{Error, Result};
-use crate::input::span_path::{Next, ReaderFor, collect_spans};
-use crate::js::{self, JsString};
-use crate::protect::blocks::{ScanCtx, Scanner};
+#[cfg(test)]
+use crate::input::span_path::collect_owned;
+use crate::input::span_path::{OwnedSpan, ReaderFor, SpanReader};
+use crate::js::{self, JsString, Re};
+use crate::protect::blocks::CheckBudget;
+#[cfg(test)]
+use crate::protect::blocks::{OpaqueScanner, ScanCtx};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -15,13 +19,11 @@ enum Mode {
     Comment,
     DashedComment,
 }
-
 use Mode::{Code, Comment, DashedComment, HashComments};
-
 type Pairs = &'static [(&'static str, &'static str, Mode)];
-
 fn delimiters(name: &str) -> Option<Pairs> {
     const HANDLEBARS: Pairs = &[
+        ("{{{{", "}}}}", Code),
         ("{{{", "}}}", Code),
         ("{{!--", "}}", DashedComment),
         ("{{~!--", "}}", DashedComment),
@@ -42,8 +44,12 @@ fn delimiters(name: &str) -> Option<Pairs> {
         _ => return None,
     })
 }
-
 const MAX_TEMPLATE_SCAN: usize = 8192;
+static HB_RAW: LazyLock<Re> = LazyLock::new(|| Re::new(r"^\s*raw(?:\s|$)", ""));
+static BODY_HEAD: LazyLock<Re> = LazyLock::new(|| Re::new(r"^-?\s*(raw|comment)\s*-?$", ""));
+static HB_END: LazyLock<Re> = LazyLock::new(|| Re::new(r"\{\{\{\{\s*\/raw\s*\}\}\}\}", "g"));
+static RAW_END: LazyLock<Re> = LazyLock::new(|| Re::new(r"\{%[-]?[ \t\r\n]*endraw[ \t\r\n]*[-]?%\}", "g"));
+static COMMENT_END: LazyLock<Re> = LazyLock::new(|| Re::new(r"\{%[-]?[ \t\r\n]*endcomment[ \t\r\n]*[-]?%\}", "g"));
 
 fn next_index(text: &[u16], needle: &[u16], from: usize, known: Option<Option<usize>>) -> Option<usize> {
     match known {
@@ -51,152 +57,241 @@ fn next_index(text: &[u16], needle: &[u16], from: usize, known: Option<Option<us
         _ => js::index_of(text, needle, from),
     }
 }
-
-fn find_close(text: &[u16], i: usize, close: &[u16], limit: usize, mode: Mode) -> Option<usize> {
-    let mut j = i;
-    let mut in_comment = mode == Comment;
-
+fn find_close(
+    text: &[u16],
+    i: usize,
+    close: &[u16],
+    limit: usize,
+    mode: Mode,
+    check: CheckBudget<'_>,
+) -> Result<Option<usize>> {
+    let (mut j, mut in_comment, mut next_check) = (i, mode == Comment, i);
     while j < limit {
+        if j >= next_check {
+            check("template-scan")?;
+            next_check = j + 0x4000;
+        }
         let c = text[j];
-
-        if !in_comment && (c == 0x22 || c == 0x27) {
+        if !in_comment && matches!(c, 34 | 39) {
             j += 1;
             while j < limit && text[j] != c {
-                j += if text[j] == 0x5C { 2 } else { 1 };
+                if j >= next_check {
+                    check("template-scan")?;
+                    next_check = j + 0x4000;
+                }
+                j += if text[j] == 92 { 2 } else { 1 };
             }
             j += 1;
             continue;
         }
-
         if js::starts_with_at(text, close, j) {
-            return Some(j + close.len());
+            return Ok(Some(j + close.len()));
         }
-
         if mode == HashComments {
-            in_comment = c == 0x23 || (in_comment && c != 0x0A);
+            in_comment = c == 35 || (in_comment && c != 10);
         }
-
         j += 1;
     }
-
-    None
+    Ok(None)
 }
 
-fn reader_for<F>(f: F) -> ReaderFor
-where
-    F: for<'a> Fn(&'a [u16], &'a ScanCtx<'a>) -> Result<Next<'a>> + Send + Sync + 'static,
-{
-    Arc::new(f)
+type Pair = (JsString, JsString, Mode);
+struct Templates<'a> {
+    text: &'a [u16],
+    check: CheckBudget<'a>,
+    name: String,
+    pairs: Arc<Vec<Pair>>,
+    bodies_only: bool,
+    active: bool,
+    last_close: HashMap<JsString, Option<usize>>,
+    dashed_plain: Option<Option<usize>>,
+    dashed_tilde: Option<Option<usize>>,
+    body_ends: HashMap<String, Option<(usize, usize)>>,
+    header_ends: HashMap<usize, Option<usize>>,
+    dashed_headers: Option<HashMap<usize, Option<usize>>>,
 }
-
+impl Templates<'_> {
+    fn read_at(&mut self, i: usize, header_only: bool) -> Result<Option<OwnedSpan>> {
+        (self.check)("template-scan")?;
+        let Some((open, close, mode)) =
+            self.pairs.iter().find(|(open, _, _)| js::starts_with_at(self.text, open, i)).cloned()
+        else {
+            return Ok(None);
+        };
+        if self.last_close.get(&close).copied().flatten().is_none_or(|at| at < i + open.len()) {
+            return Ok(None);
+        }
+        let mut scan_mode = mode;
+        if mode == DashedComment {
+            let dashes = i + open.len() - 2;
+            let end = if header_only {
+                if self.dashed_headers.is_none() {
+                    let mut headers = HashMap::new();
+                    let (mut plain, mut tilde) = (None, None);
+                    let mut from = 0;
+                    while let Some(at) = js::index_of_unit(self.text, self.pairs[0].0[0], from) {
+                        (self.check)("template-comment-headers")?;
+                        from = at + 1;
+                        let Some((prefix, _, _)) = self.pairs.iter().find(|(prefix, _, kind)| {
+                            *kind == DashedComment && js::starts_with_at(self.text, prefix, at)
+                        }) else {
+                            continue;
+                        };
+                        let start = at + prefix.len() - 2;
+                        plain = Some(next_index(self.text, &js::u("--}}"), start, plain));
+                        tilde = Some(next_index(self.text, &js::u("--~}}"), start, tilde));
+                        headers.insert(
+                            at,
+                            [plain.flatten().map(|p| p + 4), tilde.flatten().map(|p| p + 5)]
+                                .into_iter()
+                                .flatten()
+                                .min(),
+                        );
+                    }
+                    self.dashed_headers = Some(headers);
+                }
+                self.dashed_headers.as_ref().and_then(|h| h.get(&i)).copied().flatten()
+            } else {
+                self.dashed_plain = Some(next_index(self.text, &js::u("--}}"), dashes, self.dashed_plain));
+                self.dashed_tilde = Some(next_index(self.text, &js::u("--~}}"), dashes, self.dashed_tilde));
+                [self.dashed_plain.flatten().map(|p| p + 4), self.dashed_tilde.flatten().map(|p| p + 5)]
+                    .into_iter()
+                    .flatten()
+                    .min()
+            };
+            if let Some(end) = end {
+                let mut span = OwnedSpan::new((i, end, end));
+                if self.bodies_only && !header_only {
+                    span.report = Some(false);
+                }
+                return Ok(Some(span));
+            }
+            scan_mode = Comment;
+        }
+        let n = self.text.len();
+        let limit = if self.bodies_only && !header_only { n } else { n.min(i + open.len() + MAX_TEMPLATE_SCAN) };
+        if let Some(end) = find_close(self.text, i + open.len(), &close, limit, scan_mode, self.check)? {
+            if header_only {
+                return Ok(Some(OwnedSpan::new((i, end, end))));
+            }
+            let head = &self.text[i + open.len()..end - close.len()];
+            let block = if self.name == "handlebars" && open == js::u("{{{{") && HB_RAW.test(head) {
+                Some("raw".to_owned())
+            } else if open == js::u("{%") && matches!(self.name.as_str(), "liquid" | "jinja" | "nunjucks") {
+                BODY_HEAD.exec(head).map(|m| js::lossy(m.s(1)))
+            } else {
+                None
+            };
+            if let Some(block) = block.filter(|b| b != "comment" || self.name == "liquid") {
+                if !self.body_ends.contains_key(&block) || self.body_ends[&block].is_some_and(|(at, _)| at < end) {
+                    let pattern = if self.name == "handlebars" {
+                        &HB_END
+                    } else if block == "raw" {
+                        &RAW_END
+                    } else {
+                        &COMMENT_END
+                    };
+                    self.body_ends.insert(block.clone(), pattern.exec_at(self.text, end).map(|m| (m.index(), m.end())));
+                }
+                let ending = self.body_ends[&block];
+                let through = ending.map_or(n, |(_, end)| end);
+                let mut span = OwnedSpan::new((i, through, through));
+                span.tail = ending.is_none();
+                return Ok(Some(span));
+            }
+            let mut span = OwnedSpan::new((i, end, end));
+            if self.bodies_only {
+                span.report = Some(false);
+            }
+            return Ok(Some(span));
+        }
+        if header_only {
+            return Ok(None);
+        }
+        if self.bodies_only {
+            let mut span = OwnedSpan::new((i, n, n));
+            span.report = Some(false);
+            return Ok(Some(span));
+        }
+        if limit < n {
+            return Err(Error::input(
+                format!("Template expression exceeds the {MAX_TEMPLATE_SCAN}-char scan bound at offset {i}"),
+                json!({ "offset": i, "max": MAX_TEMPLATE_SCAN, "reason": "template-overlimit" }),
+            ));
+        }
+        Ok(None)
+    }
+}
+impl SpanReader for Templates<'_> {
+    fn next(&mut self, from: usize) -> Result<Option<(usize, usize, usize)>> {
+        if !self.active {
+            return Ok(None);
+        }
+        let mut cursor = from;
+        while let Some(at) = js::index_of_unit(self.text, self.pairs[0].0[0], cursor) {
+            (self.check)("template-opener")?;
+            if self.pairs.iter().any(|(open, _, _)| js::starts_with_at(self.text, open, at)) {
+                return Ok(Some((at, at, at)));
+            }
+            cursor = at + 1;
+        }
+        Ok(None)
+    }
+    fn read(&mut self, at: usize) -> Result<OwnedSpan> {
+        Ok(self.read_at(at, false)?.unwrap_or_else(|| {
+            let mut span = OwnedSpan::new((at, at + 1, at + 1));
+            span.report = Some(false);
+            span
+        }))
+    }
+    fn header(&mut self, at: usize) -> Result<Option<usize>> {
+        if self.text.get(at) != Some(&self.pairs[0].0[0])
+            || !self.pairs.iter().any(|(open, _, _)| js::starts_with_at(self.text, open, at))
+        {
+            return Ok(None);
+        }
+        if let Some(&end) = self.header_ends.get(&at) {
+            return Ok(end);
+        }
+        let end = self.read_at(at, true)?.map(|s| s.end);
+        self.header_ends.insert(at, end);
+        Ok(end)
+    }
+}
 pub fn template_reader(name: &str) -> Option<ReaderFor> {
-    let pairs: Arc<Vec<(JsString, JsString, Mode)>> =
+    template_body_reader(name, false)
+}
+pub fn template_body_reader(name: &str, bodies_only: bool) -> Option<ReaderFor> {
+    let pairs: Arc<Vec<Pair>> =
         Arc::new(delimiters(name)?.iter().map(|&(open, close, mode)| (js::u(open), js::u(close), mode)).collect());
-
-    Some(reader_for(move |text, ctx| {
-        let n = text.len();
-        let pairs = Arc::clone(&pairs);
-
-        if !pairs.iter().any(|(open, _, _)| js::includes(text, open)) {
-            return Ok(Box::new(|_| Ok(None)) as Next<'_>);
-        }
-
-        let mut last_close: HashMap<JsString, Option<usize>> = HashMap::new();
-        let mut has_close = false;
-        for (_, close, _) in pairs.iter() {
-            if !last_close.contains_key(close) {
-                let at = js::last_index_of(text, close);
-                last_close.insert(close.clone(), at);
-                has_close |= at.is_some();
-            }
-        }
-
-        if !has_close {
-            return Ok(Box::new(|_| Ok(None)) as Next<'_>);
-        }
-
-        let mut dashed_plain: Option<Option<usize>> = None;
-        let mut dashed_tilde: Option<Option<usize>> = None;
-        let first = pairs[0].0[0];
-        let dashed_plain_needle = js::u("--}}");
-        let dashed_tilde_needle = js::u("--~}}");
-
-        Ok(Box::new(move |from| {
-            let mut i = from;
-            let mut next_check = from;
-
-            while i < n {
-                if i >= next_check {
-                    (ctx.check_budget)("template-scan")?;
-                    next_check = i + 0x4000;
-                }
-
-                let Some(at) = js::index_of_unit(text, first, i) else { break };
-                i = at;
-
-                for (open, close, mode) in pairs.iter() {
-                    if !js::starts_with_at(text, open, i) {
-                        continue;
-                    }
-
-                    if last_close[close].is_none_or(|at| at < i + open.len()) {
-                        break;
-                    }
-
-                    let mut scan_mode = *mode;
-
-                    if *mode == DashedComment {
-                        let dashes = i + open.len() - 2;
-
-                        dashed_plain = Some(next_index(text, &dashed_plain_needle, dashes, dashed_plain));
-                        dashed_tilde = Some(next_index(text, &dashed_tilde_needle, dashes, dashed_tilde));
-
-                        let end = [dashed_plain.flatten().map(|p| p + 4), dashed_tilde.flatten().map(|p| p + 5)]
-                            .into_iter()
-                            .flatten()
-                            .min();
-
-                        if let Some(end) = end {
-                            return Ok(Some((i, end, end)));
-                        }
-
-                        scan_mode = Comment;
-                    }
-
-                    let limit = n.min(i + open.len() + MAX_TEMPLATE_SCAN);
-
-                    if let Some(end) = find_close(text, i + open.len(), close, limit, scan_mode) {
-                        return Ok(Some((i, end, end)));
-                    }
-
-                    if limit < n {
-                        return Err(Error::input(
-                            format!(
-                                "Template expression exceeds the {MAX_TEMPLATE_SCAN}-char scan bound at offset {i}"
-                            ),
-                            json!({ "offset": i, "max": MAX_TEMPLATE_SCAN, "reason": "template-overlimit" }),
-                        ));
-                    }
-
-                    break;
-                }
-
-                i += 1;
-            }
-
-            Ok(None)
-        }) as Next<'_>)
+    let name = name.to_owned();
+    Some(Arc::new(move |text, ctx| {
+        let last_close: HashMap<_, _> =
+            pairs.iter().map(|(_, close, _)| (close.clone(), js::last_index_of(text, close))).collect();
+        let active =
+            pairs.iter().any(|(open, _, _)| js::includes(text, open)) && last_close.values().any(Option::is_some);
+        Ok(Box::new(Templates {
+            text,
+            check: ctx.check_budget,
+            name: name.clone(),
+            pairs: pairs.clone(),
+            bodies_only,
+            active,
+            last_close,
+            dashed_plain: None,
+            dashed_tilde: None,
+            body_ends: HashMap::new(),
+            header_ends: HashMap::new(),
+            dashed_headers: None,
+        }))
     }))
 }
-
-pub fn scanner_for(reader: ReaderFor) -> Scanner {
-    Arc::new(move |text: &[u16], ctx: &ScanCtx<'_>| {
-        let mut next = reader(text, ctx)?;
-        collect_spans(&mut next)
-    })
+#[cfg(test)]
+pub fn scanner_for(reader: ReaderFor) -> OpaqueScanner {
+    Arc::new(move |text: &[u16], ctx: &ScanCtx<'_>| collect_owned(reader(text, ctx)?.as_mut()))
 }
-
-pub fn template_scanner(name: &str) -> Option<Scanner> {
+#[cfg(test)]
+fn template_scanner(name: &str) -> Option<OpaqueScanner> {
     template_reader(name).map(scanner_for)
 }
 
@@ -208,8 +303,9 @@ mod tests {
     fn scan(name: &str, text: &str) -> Result<Vec<Range>> {
         let scanner = template_scanner(name).expect("known engine");
         let elements = crate::protect::blocks::ElementSet::default();
-        let ctx = ScanCtx { check_budget: &|_| Ok(()), resolve: &|s| s.to_vec(), elements: &elements };
-        scanner(&js::u(text), &ctx)
+        let ctx =
+            ScanCtx { check_budget: &|_| Ok(()), resolve: &|s| s.to_vec(), elements: &elements, code_edges: false };
+        scanner(&js::u(text), &ctx).map(|spans| spans.into_iter().map(|(a, b, _)| (a, b)).collect())
     }
 
     #[test]

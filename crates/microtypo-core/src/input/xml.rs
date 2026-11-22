@@ -37,7 +37,7 @@ fn read_tag_name(masked: &[u16], i: usize, n: usize) -> Option<TagName<'_>> {
     let is_close = masked.get(i + 1) == Some(&0x2F);
     let name_start = if is_close { i + 2 } else { i + 1 };
 
-    if name_start >= n || !is_tag_name_start(js::code_point_at(masked, name_start)) {
+    if name_start >= n || !is_tag_name_start(js::code_point_at(masked, name_start), true) {
         return None;
     }
 
@@ -272,47 +272,49 @@ pub fn scan_doctype(text: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<R
     Ok(spans)
 }
 
+pub fn xml_construct_end(text: &[u16], at: usize, check: CheckBudget<'_>) -> Result<Option<usize>> {
+    if js::starts_with_at(text, &DOCTYPE, at) {
+        return doctype_end(text, at, check).map(Some);
+    }
+    match BLOCKS.iter().position(|(open, _)| js::starts_with_at(text, open, at)) {
+        Some(block) => block_end(text, block, at, check).map(Some),
+        None => Ok(None),
+    }
+}
+
+pub fn xml_construct_reader<'a>(text: &'a [u16], check: CheckBudget<'a>) -> crate::input::span_path::Next<'a> {
+    let mut next_check = 0;
+    Box::new(move |from| {
+        let mut cursor = from;
+        while let Some(i) = js::index_of_unit(text, 0x3C, cursor) {
+            if i >= next_check {
+                check("xml-construct-scan")?;
+                next_check = i + 0x4000;
+            }
+            if let Some(end) = xml_construct_end(text, i, check)? {
+                return Ok(Some((i, end, end)));
+            }
+            cursor = i + 1;
+        }
+        Ok(None)
+    })
+}
+
 fn mask_xml_constructs<'t>(text: &'t [u16], check_budget: CheckBudget<'_>) -> Result<Cow<'t, [u16]>> {
     if !js::includes(text, &js::u("<!")) && !js::includes(text, &js::u("<?")) {
         return Ok(Cow::Borrowed(text));
     }
 
-    let n = text.len();
+    let mut next = xml_construct_reader(text, check_budget);
     let mut out: Option<JsString> = None;
-    let mut i = 0;
+    let mut from = 0;
     let mut chunk_start = 0;
-    let mut next_check = 0;
-
-    while i < n {
-        if i >= next_check {
-            check_budget("xml-construct-scan")?;
-            next_check = i + 0x4000;
-        }
-
-        if text[i] != 0x3C {
-            i += 1;
-            continue;
-        }
-
-        let end = if js::starts_with_at(text, &DOCTYPE, i) {
-            Some(doctype_end(text, i, check_budget)?)
-        } else {
-            match BLOCKS.iter().position(|(open, _)| js::starts_with_at(text, open, i)) {
-                Some(block) => Some(block_end(text, block, i, check_budget)?),
-                None => None,
-            }
-        };
-
-        let Some(end) = end else {
-            i += 1;
-            continue;
-        };
-
+    while let Some((start, end, after)) = next(from)? {
         let chunks = out.get_or_insert_with(Vec::new);
-        chunks.extend_from_slice(&text[chunk_start..i]);
-        chunks.resize(chunks.len() + (end - i), 0x20);
+        chunks.extend_from_slice(&text[chunk_start..start]);
+        chunks.resize(chunks.len() + end - start, 0x20);
         chunk_start = end;
-        i = end;
+        from = after;
     }
 
     let Some(mut chunks) = out else {
@@ -397,7 +399,12 @@ pub fn validate_xml(text: &[u16], check_budget: CheckBudget<'_>) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn scan_xml_space_preserve(text: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<Range>> {
+    scan_xml_space_preserve_whole(text, check_budget, false)
+}
+
+pub fn scan_xml_space_preserve_whole(text: &[u16], check_budget: CheckBudget<'_>, whole: bool) -> Result<Vec<Range>> {
     if !js::includes(text, &XML_SPACE) {
         return Ok(Vec::new());
     }
@@ -438,13 +445,13 @@ pub fn scan_xml_space_preserve(text: &[u16], check_budget: CheckBudget<'_>) -> R
             stack.pop();
 
             if preserve_depth == Some(stack.len()) {
-                spans.push((preserve_start, i));
+                spans.push((preserve_start, if whole { tag_end } else { i }));
                 preserve_depth = None;
             }
         } else if !self_closing {
             if preserve_depth.is_none() && attrs.preserve {
                 preserve_depth = Some(stack.len());
-                preserve_start = tag_end;
+                preserve_start = if whole { i } else { tag_end };
             }
 
             stack.push(name);

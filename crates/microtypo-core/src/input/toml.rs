@@ -374,6 +374,14 @@ fn scan_inline_collection(
 }
 
 pub fn scan_toml(src: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<LocatedSpan>> {
+    if let Some(offset) =
+        src.iter().enumerate().find_map(|(i, &c)| (c == 13 && src.get(i + 1) != Some(&10)).then_some(i))
+    {
+        return Err(Error::input(
+            "TOML newlines must use LF or CRLF; bare CR is not permitted",
+            json!({"offset":offset,"reason":"toml-bare-cr"}),
+        ));
+    }
     let mut spans = Vec::new();
     let n = src.len();
     let mut i = 0;

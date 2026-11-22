@@ -4,13 +4,25 @@ use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::LazyLock;
+use std::time::Instant;
 
-use microtypo_core::api;
+use microtypo_core::Host;
 use serde_json::Value;
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+const HOST: Host = Host { now_ms, fill_random };
+
+fn now_ms() -> f64 {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    START.elapsed().as_secs_f64() * 1000.0
+}
+
+fn fill_random(bytes: &mut [u8]) {
+    getrandom::fill(bytes).expect("the system CSPRNG is available");
+}
 
 #[derive(Debug)]
 pub struct Engine(microtypo_core::MicroTypo);
@@ -110,7 +122,7 @@ pub unsafe extern "C" fn microtypo_engine_new(config_json: *const c_char, error:
     unsafe {
         guarded(error, || {
             let config = read_json(config_json, "config")?;
-            microtypo_core::MicroTypo::new(config.as_ref()).map_err(|e| Error::from_engine(&e))
+            microtypo_core::MicroTypo::new(config.as_ref(), HOST).map_err(|e| Error::from_engine(&e))
         })
     }
     .map_or(ptr::null_mut(), |engine| Box::into_raw(Box::new(Engine(engine))))
@@ -175,11 +187,11 @@ pub unsafe extern "C" fn microtypo_engine_process(
             let engine = engine.as_mut().ok_or_else(|| Error::internal("engine is NULL"))?;
             let out = out.as_mut().ok_or_else(|| Error::internal("out is NULL"))?;
             let text = if len == 0 { &[][..] } else { std::slice::from_raw_parts(text, len) };
-            let options = with_changes.then(|| serde_json::json!({ "changes": true }));
-            let (units, changes) = match engine.0.process_with_options(text, options.as_ref()) {
-                Ok(api::Output::Text(t)) => (t, Vec::new()),
-                Ok(api::Output::WithChanges(p)) => (p.text, p.changes.iter().flat_map(|&(a, b)| [a, b]).collect()),
-                Err(e) => return Err(Error::from_engine(&e)),
+            let (units, changes) = if with_changes {
+                let output = engine.0.process_with_changes(text).map_err(|e| Error::from_engine(&e))?;
+                (output.text, output.changes.into_iter().flat_map(|(a, b)| [a, b]).collect())
+            } else {
+                (engine.0.process_utf16(text).map_err(|e| Error::from_engine(&e))?, Vec::new())
             };
             let (units, len) = into_raw(units);
             let (changes, flat) = into_raw(changes);
@@ -344,5 +356,21 @@ mod tests {
         }
         // SAFETY: the version is a static NUL-terminated string.
         assert_eq!(unsafe { CStr::from_ptr(microtypo_version()) }.to_str().unwrap(), microtypo_core::VERSION);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "a run past a 200 ms budget takes hours under Miri")]
+    fn the_budget_ends_a_catastrophic_input() {
+        let config = c"{\"input\":\"markdown\",\"maxProcessingMs\":200,\"maxInputLength\":60000}";
+        let mut error = ptr::null_mut();
+        // SAFETY: a C string literal and a local slot.
+        let engine = unsafe { microtypo_engine_new(config.as_ptr(), &raw mut error) };
+        assert!(!engine.is_null() && error.is_null());
+        let started = Instant::now();
+        let message = process(engine, &" ".repeat(60_000), false).unwrap_err();
+        assert!(started.elapsed().as_millis() < 400, "the budget error came after {:?}", started.elapsed());
+        assert!(message.starts_with("Processing exceeded 200ms budget at "), "{message}");
+        // SAFETY: the engine is freed once.
+        unsafe { microtypo_engine_free(engine) };
     }
 }

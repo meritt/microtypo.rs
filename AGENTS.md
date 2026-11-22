@@ -5,9 +5,9 @@ Rust port of [microtypo](https://github.com/meritt/microtypo). Output, `changes`
 ## Rules
 
 - Port reference behaviour; never redesign a typography rule here.
-- A module mirrors the reference file of the same path (`src/lib/` maps to `shared`).
+- A module mirrors the reference file of the same path (`src/lib/` maps to `shared`) in its rule definitions and scanners; how patterns execute (`vendor/regress`, the prefilter, required strings) is the port's own.
 - Tests cover library behaviour and performance only.
-- No comments in code beyond the `SAFETY:` notes and `# Safety` sections clippy requires; constraints go to `docs/architecture.md`.
+- No comments in code beyond rustdoc on public items and the `SAFETY:` notes and `# Safety` sections clippy requires; constraints go to `docs/architecture.md`.
 - Commit messages: one line, Russian, capitalised.
 
 ## Setup

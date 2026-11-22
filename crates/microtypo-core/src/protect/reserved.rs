@@ -23,6 +23,25 @@ impl Escaped {
     pub fn unescape(&self, typeset: &[u16]) -> JsString {
         typeset.iter().map(|c| self.back.get(c).copied().unwrap_or(*c)).collect()
     }
+
+    pub fn unescape_with(&self, text: JsString, mapping: &mut crate::shared::provenance::RestoreMap) -> JsString {
+        let result = self.unescape(&text);
+        let edits = text
+            .iter()
+            .zip(&result)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, (_, value))| {
+                crate::shared::provenance::MapEdit::from(crate::shared::diff::Edit {
+                    start: i,
+                    end: i + 1,
+                    text: vec![*value],
+                })
+            })
+            .collect();
+        mapping.record(text, result.clone(), edits);
+        result
+    }
 }
 
 pub fn escape_reserved(text: &[u16]) -> Result<Option<Escaped>> {

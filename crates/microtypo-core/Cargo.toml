@@ -17,8 +17,9 @@ workspace = true
 
 [dependencies]
 regress.workspace = true
+serde = { version = "1", default-features = false, features = ["std"] }
 serde_json.workspace = true
-getrandom.workspace = true
 
-[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-js-sys.workspace = true
+[dev-dependencies]
+getrandom.workspace = true
+microtypo-conformance = { path = "../microtypo-conformance" }

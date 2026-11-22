@@ -1,17 +1,21 @@
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::engine::{MicroTypo, Processed, js_to_string};
+use crate::engine::{MicroTypo, js_to_string};
 use crate::errors::{Error, Result};
 use crate::js::JsString;
+use crate::js::raw_json::{Node, RawJson};
 use crate::protect::blocks::{to_non_capturing, to_non_capturing_elements};
 
+/// The result of [`MicroTypo::process_with_options`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Output {
+    /// The processed text, when none of `changes`, `edits` and `trace` is set.
     Text(JsString),
-    WithChanges(Processed),
+    /// The processed text with what `changes`, `edits` and `trace` request.
+    Diagnostics(crate::Diagnostics),
 }
 
-fn type_of(value: &Value) -> &'static str {
+pub(crate) fn type_of(value: &Value) -> &'static str {
     match value {
         Value::Null | Value::Array(_) | Value::Object(_) => "object",
         Value::Bool(_) => "boolean",
@@ -20,7 +24,7 @@ fn type_of(value: &Value) -> &'static str {
     }
 }
 
-fn truthy(value: &Value) -> bool {
+pub(crate) fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -30,32 +34,44 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-pub fn read_process_options(options: Option<&Value>) -> Result<bool> {
-    let Some(changes) = options.and_then(Value::as_object).and_then(|o| o.get("changes")) else {
-        return Ok(false);
-    };
-
-    match changes {
-        Value::Bool(b) => Ok(*b),
-        other => Err(Error::config(
-            "process() option \"changes\" must be a boolean",
-            json!({ "option": "changes", "receivedType": type_of(other) }),
-        )),
-    }
-}
-
 impl MicroTypo {
+    /// Typesets UTF-16 code units with the `options` object of the reference `process(text, options)`; a non-boolean option fails with `MicroTypoConfigError`.
     pub fn process_with_options(&mut self, text: &[u16], options: Option<&Value>) -> Result<Output> {
-        if read_process_options(options)? {
-            self.process_with_changes(text).map(Output::WithChanges)
+        let diagnostics = crate::ProcessOptions::read(options)?;
+        if diagnostics.changes || diagnostics.trace || diagnostics.edits {
+            self.process_with_diagnostics(text, diagnostics).map(Output::Diagnostics)
         } else {
-            self.process(text).map(Output::Text)
+            self.process_utf16(text).map(Output::Text)
         }
     }
 
+    /// Calls a configuration method of the reference engine by name: `registerRuleGroup`, `applyOptions`, `setLayout`, `setPrefix`, `addSafeTag` or `addSafeBlock`; another name fails with `TypeError`.
     pub fn call(&mut self, method: &str, args: &[Value]) -> Result<()> {
+        let args = Value::Array(args.to_vec());
+        self.call_node(method, Node::root(&args, None))
+    }
+
+    /// [`call`](Self::call) with the arguments as JSON text, whose strings keep lone surrogates; text that is not JSON fails with `MicroTypoConfigError` and `details.reason` `"json"`.
+    pub fn call_json(&mut self, method: &str, args: &str) -> Result<()> {
+        let raw = RawJson::parse(args)?;
+        self.call_node(method, Node::root(&raw.value, Some(&raw)))
+    }
+
+    fn call_node(&mut self, method: &str, input: Node<'_>) -> Result<()> {
+        let args = input.value.as_array().cloned().unwrap_or_else(|| vec![input.value.clone()]);
         match method {
-            "applyOptions" => self.apply_options(args.first()).map(|_| ()),
+            "registerRuleGroup" => {
+                let options = input.argument(1);
+                let name = options.value.get("name").and_then(Value::as_str).map(|_| options.key("name").units());
+                let position = if options.value.get("position").is_some_and(Value::is_string) {
+                    options.key("position").units()
+                } else {
+                    crate::js::u("end")
+                };
+                let group = crate::schemas::data_rules::data_group(input.argument(0), name.as_deref())?;
+                self.register_compiled(group, &position).map(|_| ())
+            }
+            "applyOptions" => self.apply_options_node(input.argument(0)).map(|_| ()),
             "setLayout" => self.set_layout_value(args.first().unwrap_or(&Value::Null)),
             "setPrefix" => self.set_prefix_value(args.first().unwrap_or(&Value::Null)).map(|_| ()),
             "addSafeTag" => match args.first() {
@@ -107,9 +123,5 @@ impl MicroTypo {
         };
         let (o, c) = (source(open)?, source(close)?);
         self.add_safe_block_sources(&id_text, &o, &c, || with_id(&[("open", open), ("close", close)]))
-    }
-
-    pub fn call_str(&mut self, method: &str, arg: &str) -> Result<()> {
-        self.call(method, &[Value::String(arg.to_owned())])
     }
 }

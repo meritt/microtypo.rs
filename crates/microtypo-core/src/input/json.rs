@@ -15,19 +15,36 @@ enum Kind {
 struct Frame {
     kind: Kind,
     base: Chain,
+    start: usize,
+}
+
+fn position_of(frame: &Frame) -> Position {
+    match &frame.kind {
+        Kind::Object { key, .. } => Position::Key(key.clone().unwrap_or_else(|| js::u("null"))),
+        Kind::Array { index } => Position::Index(*index),
+    }
 }
 
 fn chain_of(frame: Option<&Frame>) -> Chain {
     let frame = frame?;
-    let position = match &frame.kind {
-        Kind::Object { key, .. } => Position::Key(key.clone().unwrap_or_else(|| js::u("null"))),
-        Kind::Array { index } => Position::Index(*index),
-    };
+    let position = position_of(frame);
     chain_append(&frame.base, [position])
 }
 
 pub fn scan_json(src: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<LocatedSpan>> {
+    Ok(scan_json_owned(src, check_budget, false)?.spans)
+}
+
+pub struct JsonScan {
+    pub spans: Vec<LocatedSpan>,
+    pub owners: Vec<Option<usize>>,
+    pub containers: Vec<(usize, Option<(usize, Position)>)>,
+}
+
+pub fn scan_json_owned(src: &[u16], check_budget: CheckBudget<'_>, owners: bool) -> Result<JsonScan> {
     let mut spans = Vec::new();
+    let mut string_owners = Vec::new();
+    let mut containers = Vec::new();
     let mut stack: Vec<Frame> = Vec::new();
     let n = src.len();
     let mut i = 0;
@@ -70,6 +87,9 @@ pub fn scan_json(src: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<Locat
             }
 
             let end = i;
+            if owners {
+                string_owners.push(stack.last().map(|frame| frame.start));
+            }
             match stack.last_mut() {
                 None => spans.push(LocatedSpan::new(start, end, false, None)),
                 Some(frame) => {
@@ -93,14 +113,17 @@ pub fn scan_json(src: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<Locat
             continue;
         }
 
+        if owners && matches!(ch, 0x7b | 0x5b) {
+            containers.push((i, stack.last().map(|frame| (frame.start, position_of(frame)))));
+        }
         match ch {
             0x7B => {
                 let base = chain_of(stack.last());
-                stack.push(Frame { kind: Kind::Object { key: None, expect_key: true }, base });
+                stack.push(Frame { kind: Kind::Object { key: None, expect_key: true }, base, start: i });
             }
             0x5B => {
                 let base = chain_of(stack.last());
-                stack.push(Frame { kind: Kind::Array { index: 0 }, base });
+                stack.push(Frame { kind: Kind::Array { index: 0 }, base, start: i });
             }
             0x7D | 0x5D => {
                 let matches = match stack.pop() {
@@ -140,7 +163,7 @@ pub fn scan_json(src: &[u16], check_budget: CheckBudget<'_>) -> Result<Vec<Locat
         ));
     }
 
-    Ok(spans)
+    Ok(JsonScan { spans, owners: string_owners, containers })
 }
 
 #[derive(Debug, Clone)]

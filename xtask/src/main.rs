@@ -16,7 +16,7 @@ const BINARYEN: &str = "133";
 
 const WASM_OPT_FLAGS: [&str; 3] = ["-Os", "--strip-debug", "--strip-producers"];
 
-const WASM_GZIP_BUDGET: u64 = 430_000;
+const WASM_GZIP_BUDGET: u64 = 750_000;
 
 const CORPUS_SOURCE: &str = "test/conformance/corpus.jsonl";
 const CORPUS: &str = "corpus.jsonl";

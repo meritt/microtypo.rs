@@ -1,5 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+
+use crate::errors::Result;
+use crate::protect::blocks::{CheckBudget, Range};
 
 use crate::js::{self, JsString, Re};
 use crate::shared::block_tags::VOID_TAG_NAMES;
@@ -66,15 +69,21 @@ pub fn named_at(text: &[u16], at: usize, name: &str) -> bool {
     name_matches_at(text, at, name, NAME_END)
 }
 
-fn raw_text_name_at<'a>(text: &[u16], at: usize, raw_text: &'a [String]) -> Option<&'a str> {
-    raw_text.iter().find(|name| name_matches_at(text, at, name, NAME_END)).map(String::as_str)
+fn raw_text_name_at<'a>(text: &[u16], at: usize, raw_text: &'a [String], case_sensitive: bool) -> Option<&'a str> {
+    raw_text
+        .iter()
+        .find(|name| {
+            (!case_sensitive || js::starts_with_at(text, &js::u(name), at)) && name_matches_at(text, at, name, NAME_END)
+        })
+        .map(String::as_str)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
-    Html,
+    #[default]
     Document,
     Fragment,
+    Markdown,
 }
 
 const NAME: usize = 0;
@@ -99,14 +108,17 @@ fn is_space(ch: u16) -> bool {
     matches!(ch, 0x20 | 0x0A | 0x09 | 0x0D | 0x0C)
 }
 
-fn step(state: usize, ch: u16, fragment: bool) -> isize {
+fn step(state: usize, ch: u16, fragment: bool, markdown: bool) -> isize {
     if let Some(quote) = CLOSING_QUOTE[state] {
         return if ch == quote { AFTER_QUOTE[state] as isize } else { state as isize };
+    }
+    if markdown && ch == 0x60 && state != DECLARATION {
+        return FAILED;
     }
     if ch == GT {
         return ENDED;
     }
-    if ch == LT && (fragment || state == DECLARATION) {
+    if ch == LT && fragment && state != DECLARATION {
         return FAILED;
     }
     (match state {
@@ -171,65 +183,154 @@ fn first_state(ch: Option<u16>) -> usize {
     if opens_declaration(ch) { DECLARATION } else { NAME }
 }
 
-pub fn tag_end(text: &[u16], at: usize, reading: Reading) -> isize {
-    if reading == Reading::Html && opens_declaration(text.get(at).copied()) {
-        return js::index_of_unit(text, GT, at).map_or(-1, |p| p as isize);
+pub fn quoted_attribute_spans(
+    text: &[u16],
+    tags: &[Span],
+    check: crate::protect::blocks::CheckBudget<'_>,
+) -> crate::errors::Result<Vec<(usize, usize)>> {
+    let mut quoted = Vec::new();
+    for span in tags {
+        let from = span.start + if text.get(span.start + 1) == Some(&SLASH) { 2 } else { 1 };
+        if opens_declaration(text.get(from).copied()) {
+            continue;
+        }
+        let mut state = first_state(text.get(from).copied());
+        let mut open = None;
+        for (at, &ch) in text.iter().enumerate().take(span.end.min(text.len())).skip(from) {
+            if at & 1023 == 0 {
+                check("tag-quoted-values")?;
+            }
+            let before = CLOSING_QUOTE[state];
+            let to = step(state, ch, false, false);
+            if to < 0 {
+                break;
+            }
+            state = to as usize;
+            let after = CLOSING_QUOTE[state];
+            if before.is_none() && after.is_some() {
+                open = Some(at + 1);
+            } else if before.is_some() && after.is_none() {
+                quoted.push((open.expect("quoted value opened"), at));
+                open = None;
+            }
+        }
+        if let Some(open) = open {
+            quoted.push((open, span.end.min(text.len())));
+        }
     }
-    let fragment = reading == Reading::Fragment;
+    Ok(quoted)
+}
+
+pub type AtomRead<'a> = Option<&'a mut dyn FnMut(usize) -> Result<Option<usize>>>;
+
+pub fn tag_end(text: &[u16], at: usize, reading: Reading) -> isize {
+    tag_end_with(text, at, reading, &|_| Ok(()), None).expect("unlimited scanner")
+}
+
+fn tag_end_with(
+    text: &[u16],
+    at: usize,
+    reading: Reading,
+    check: CheckBudget<'_>,
+    mut atom: AtomRead<'_>,
+) -> Result<isize> {
+    let fragment = reading != Reading::Document;
     let mut state = first_state(text.get(at).copied());
     let mut i = at;
     while i < text.len() {
-        if let Some(quote) = CLOSING_QUOTE[state] {
-            match js::index_of_unit(text, quote, i) {
-                None => return -1,
-                Some(close) => {
-                    i = close;
-                    state = AFTER_QUOTE[state];
-                    i += 1;
-                    continue;
-                }
-            }
+        if i & 0x3fff == 0 {
+            check("tag-end")?;
         }
-        let next = step(state, text[i], fragment);
-        if next == ENDED {
-            return i as isize;
+        if let Some(end) = match atom.as_mut() {
+            Some(read) => read(i)?,
+            None => None,
+        } && end > i
+        {
+            state = step(state, 120, fragment, false) as usize;
+            i = end;
+            continue;
         }
-        if next == FAILED {
-            return FAILED;
+        if atom.is_none()
+            && let Some(quote) = CLOSING_QUOTE[state]
+        {
+            let Some(close) = js::index_of_unit(text, quote, i) else {
+                return Ok(-1);
+            };
+            i = close + 1;
+            state = AFTER_QUOTE[state];
+            continue;
         }
-        state = next as usize;
+        let to = step(state, text[i], fragment, reading == Reading::Markdown);
+        if to == ENDED {
+            return Ok(i as isize);
+        }
+        if to == FAILED {
+            return Ok(FAILED);
+        }
+        state = to as usize;
         i += 1;
     }
-    -1
+    Ok(-1)
 }
 
 pub fn tag_ends_from(text: &[u16], from: usize, reading: Reading) -> Vec<isize> {
-    let fragment = reading == Reading::Fragment;
+    tag_ends_with(text, from, reading, &|_| Ok(()), None).expect("unlimited scanner")
+}
+
+fn tag_ends_with(
+    text: &[u16],
+    from: usize,
+    reading: Reading,
+    check: CheckBudget<'_>,
+    mut atom: AtomRead<'_>,
+) -> Result<Vec<isize>> {
+    let fragment = reading != Reading::Document;
     let mut ends = vec![0isize; text.len()];
     let mut row = [-1isize; STATES];
     let mut next = [0isize; STATES];
-    let mut i = text.len();
-    while i > from {
-        i -= 1;
+    let mut atoms = HashMap::new();
+    let mut after_atoms = HashMap::new();
+    if let Some(read) = atom.as_mut() {
+        for i in from..text.len() {
+            if i & 0x3fff == 0 {
+                check("tag-atoms")?;
+            }
+            if let Some(end) = read(i)?
+                && end > i
+            {
+                atoms.insert(i, end);
+                after_atoms.insert(end, [-1isize; STATES]);
+            }
+        }
+    }
+    for i in (from..text.len()).rev() {
+        if i & 0x3fff == 0 {
+            check("tag-ends")?;
+        }
+        if let Some(after) = after_atoms.get_mut(&(i + 1)) {
+            *after = row;
+        }
         let ch = text[i];
         for (state, slot) in next.iter_mut().enumerate() {
-            let to = step(state, ch, fragment);
-            *slot = if to == ENDED {
-                i as isize
-            } else if to == FAILED {
-                FAILED
+            if let Some(end) = atoms.get(&i) {
+                *slot = after_atoms[end][step(state, 120, fragment, false) as usize];
             } else {
-                row[to as usize]
-            };
+                let to = step(state, ch, fragment, reading == Reading::Markdown);
+                *slot = if to == ENDED {
+                    i as isize
+                } else if to == FAILED {
+                    FAILED
+                } else {
+                    row[to as usize]
+                };
+            }
         }
         std::mem::swap(&mut row, &mut next);
-        let prev = if i >= 1 { text.get(i - 1).copied() } else { None };
-        let prev2 = if i >= 2 { text.get(i - 2).copied() } else { None };
-        if prev == Some(LT) || (prev == Some(SLASH) && prev2 == Some(LT)) {
+        if i > 0 && (text[i - 1] == LT || (i > 1 && text[i - 1] == SLASH && text[i - 2] == LT)) {
             ends[i] = row[first_state(Some(ch))];
         }
     }
-    ends
+    Ok(ends)
 }
 
 static BREAKOUT: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -384,68 +485,169 @@ fn in_hash(name: &[u16], set: &HashSet<&'static str>) -> bool {
 }
 
 pub fn self_closing(text: &[u16], start: usize, gt: usize) -> bool {
+    self_closing_with(text, start, gt, None, &|_| Ok(())).expect("unlimited scanner")
+}
+
+pub fn self_closing_with(
+    text: &[u16],
+    start: usize,
+    gt: usize,
+    mut atom: AtomRead<'_>,
+    check: CheckBudget<'_>,
+) -> Result<bool> {
     if text.get(gt) != Some(&GT) || gt == 0 || text.get(gt - 1) != Some(&SLASH) {
-        return false;
+        return Ok(false);
     }
     let mut state = NAME;
     let mut i = start + 1;
     while i + 1 < gt {
-        if let Some(quote) = CLOSING_QUOTE[state] {
-            match js::index_of_unit(text, quote, i) {
-                Some(close) if close < gt - 1 => {
-                    i = close + 1;
-                    state = AFTER_QUOTE[state];
-                    continue;
-                }
-                _ => return false,
-            }
+        if i & 0x3fff == 0 {
+            check("tag-self-close")?;
         }
-        let next = step(state, text[i], false);
+        if let Some(end) = match atom.as_mut() {
+            Some(read) => read(i)?,
+            None => None,
+        } && end > i
+            && end <= gt
+        {
+            state = step(state, 120, false, false) as usize;
+            i = end;
+            continue;
+        }
+        if atom.is_none()
+            && let Some(quote) = CLOSING_QUOTE[state]
+        {
+            let Some(close) = js::index_of_unit(text, quote, i).filter(|&p| p < gt - 1) else {
+                return Ok(false);
+            };
+            i = close + 1;
+            state = AFTER_QUOTE[state];
+            continue;
+        }
+        let next = step(state, text[i], false, false);
         if next < 0 {
-            return false;
+            return Ok(false);
         }
         state = next as usize;
         i += 1;
     }
-    state == NAME || state == BEFORE_ATTR || state == ATTR
+    Ok(matches!(state, NAME | BEFORE_ATTR | ATTR))
 }
 
-struct Frame {
+#[derive(Debug)]
+pub struct ForeignFrame {
     name: JsString,
     svg: bool,
     html: bool,
     element: bool,
 }
-
-#[derive(Default)]
-struct ForeignContent {
-    stack: Vec<Frame>,
-    open: HashMap<JsString, usize>,
+pub type ForeignContext = Option<Arc<ForeignFrame>>;
+pub type Scope = (usize, Option<(JsString, bool, bool, bool)>);
+type Undo = Vec<(bool, Arc<ForeignFrame>)>;
+struct ForeignContent<'a> {
+    stack: Vec<Arc<ForeignFrame>>,
+    open: HashMap<JsString, Vec<usize>>,
+    undo: Option<Undo>,
+    reads: Option<Vec<isize>>,
+    parents: Vec<(Option<Undo>, Option<Vec<isize>>)>,
+    check: CheckBudget<'a>,
 }
-
-impl ForeignContent {
-    fn html(&self) -> bool {
-        self.stack.last().is_none_or(|f| f.html)
+impl<'a> ForeignContent<'a> {
+    fn new(check: CheckBudget<'a>) -> Self {
+        Self { stack: Vec::new(), open: HashMap::new(), undo: None, reads: None, parents: Vec::new(), check }
     }
-
-    fn cdata(&self) -> bool {
-        self.stack.last().is_some_and(|f| !f.element)
+    fn touch(&mut self, depth: isize) {
+        if let Some(reads) = self.reads.as_mut() {
+            reads.push(depth);
+        }
     }
-
-    fn start(&mut self, text: &[u16], name_start: usize, start: usize, gt: usize) -> ElementReading {
+    fn top(&mut self) -> ForeignContext {
+        self.touch(self.stack.len() as isize - 1);
+        self.stack.last().cloned()
+    }
+    fn context(&self) -> ForeignContext {
+        self.stack.last().cloned()
+    }
+    fn mark(&self) -> usize {
+        self.reads.as_ref().map_or(0, Vec::len)
+    }
+    fn begin(&mut self) {
+        self.parents.push((self.undo.take(), self.reads.take()));
+        self.undo = Some(Vec::new());
+        self.reads = Some(Vec::new());
+    }
+    fn finish(&mut self, keep: bool, through: Option<usize>) -> Result<Vec<isize>> {
+        let undo = self.undo.take().expect("foreign transaction");
+        let reads = self.reads.take().expect("foreign dependency journal");
+        let through = through.unwrap_or(reads.len());
+        let mut minimums = vec![isize::MAX; through + 1];
+        for i in (0..through).rev() {
+            if i & 0x3fff == 0 {
+                (self.check)("foreign-dependencies")?;
+            }
+            minimums[i] = minimums[i + 1].min(reads[i]);
+        }
+        if !keep {
+            for (i, (push, frame)) in undo.iter().enumerate().rev() {
+                if i & 0x3fff == 0 {
+                    (self.check)("foreign-rollback")?;
+                }
+                if *push {
+                    self.open.entry(frame.name.clone()).or_default().push(self.stack.len());
+                    self.stack.push(frame.clone());
+                } else {
+                    self.pop();
+                }
+            }
+        }
+        let (parent_undo, parent_reads) = self.parents.pop().expect("parent foreign transaction");
+        self.undo = parent_undo;
+        self.reads = parent_reads;
+        if keep && let Some(parent) = self.undo.as_mut() {
+            for (i, operation) in undo.into_iter().enumerate() {
+                if i & 0x3fff == 0 {
+                    (self.check)("foreign-commit")?;
+                }
+                parent.push(operation);
+            }
+        }
+        if let Some(parent) = self.reads.as_mut() {
+            for (i, depth) in reads.into_iter().enumerate() {
+                if i & 0x3fff == 0 {
+                    (self.check)("foreign-dependencies")?;
+                }
+                parent.push(depth);
+            }
+        }
+        Ok(minimums)
+    }
+    fn html(&mut self) -> bool {
+        self.top().is_none_or(|f| f.html)
+    }
+    fn cdata(&mut self) -> bool {
+        self.top().is_some_and(|f| !f.element)
+    }
+    fn start(
+        &mut self,
+        text: &[u16],
+        name_start: usize,
+        start: usize,
+        gt: usize,
+        atom: AtomRead<'_>,
+    ) -> Result<ElementReading> {
         if self.html() {
-            return self.start_html(text, name_start, start, gt);
+            return self.start_html(text, name_start, start, gt, atom);
         }
         let name = tag_name(text, name_start);
         if in_hash(&name, &BREAKOUT)
             || (eq(&name, "font") && FONT_BREAKOUT_RE.test(js::slice(text, name_start + 4, gt)))
         {
             self.leave();
-            return self.start_html(text, name_start, start, gt);
+            return self.start_html(text, name_start, start, gt, atom);
         }
-        let empty = self_closing(text, start, gt);
+        let empty = self_closing_with(text, start, gt, atom, self.check)?;
         if !empty {
-            let top = self.stack.last().expect("foreign content has a frame");
+            let top = self.top().expect("foreign content frame");
             let svg = top.svg || (eq(&name, "svg") && eq(&top.name, "annotation-xml"));
             let html = if svg {
                 in_set(&name, SVG_HTML)
@@ -455,33 +657,40 @@ impl ForeignContent {
             };
             self.push(name, svg, html, false);
         }
-        if empty { ElementReading::OpensNothing } else { ElementReading::Foreign }
+        Ok(if empty { ElementReading::OpensNothing } else { ElementReading::Foreign })
     }
-
-    fn start_html(&mut self, text: &[u16], name_start: usize, start: usize, gt: usize) -> ElementReading {
+    fn start_html(
+        &mut self,
+        text: &[u16],
+        name_start: usize,
+        start: usize,
+        gt: usize,
+        atom: AtomRead<'_>,
+    ) -> Result<ElementReading> {
         let svg = name_matches_at(text, name_start, "svg", NAME_END);
         if svg || name_matches_at(text, name_start, "math", NAME_END) {
-            if !self_closing(text, start, gt) {
+            if !self_closing_with(text, start, gt, atom, self.check)? {
                 self.push(js::u(if svg { "svg" } else { "math" }), svg, false, false);
             }
         } else if !self.stack.is_empty() {
             self.open_html(tag_name(text, name_start));
         }
-        ElementReading::Html
+        Ok(ElementReading::Html)
     }
-
     fn end(&mut self, text: &[u16], name_start: usize) {
         if self.stack.is_empty() {
             return;
         }
         let name = tag_name(text, name_start);
-        if self.open.get(&name).copied().unwrap_or(0) == 0 {
+        let position = self.open.get(&name).and_then(|p| p.last()).copied();
+        self.touch(position.map_or(-1, |p| p as isize));
+        if position.is_none() {
             if !self.html() {
                 self.leave();
             }
             return;
         }
-        let html = self.stack.last().is_some_and(|f| f.element);
+        let html = self.top().expect("open frame").element;
         let at = if html {
             let skip: Vec<&str> = if in_hash(&name, &BLOCK) || in_set(&name, TABLE) {
                 OPTIONAL.iter().copied().collect()
@@ -492,26 +701,19 @@ impl ForeignContent {
         } else {
             self.closes(&name, None)
         };
-        match at {
-            Some(at) => {
-                while self.stack.len() > at {
-                    self.pop();
-                }
+        if let Some(at) = at {
+            while self.stack.len() > at {
+                self.pop();
             }
-            None => {
-                if !html && !self.html() {
-                    self.leave();
-                }
-            }
+        } else if !html && !self.html() {
+            self.leave();
         }
     }
-
-    fn closes(&self, name: &[u16], skip: Option<&[&str]>) -> Option<usize> {
+    fn closes(&mut self, name: &[u16], skip: Option<&[&str]>) -> Option<usize> {
         let html = skip.is_some();
         let floor = self.stack.len().saturating_sub(REACH);
-        let mut k = self.stack.len();
-        while k > floor {
-            k -= 1;
+        for k in (floor..self.stack.len()).rev() {
+            self.touch(k as isize);
             let frame = &self.stack[k];
             if frame.element != html {
                 return None;
@@ -519,27 +721,22 @@ impl ForeignContent {
             if frame.name == name {
                 return Some(k);
             }
-            if let Some(skip) = skip
-                && !in_set(&frame.name, skip)
-            {
+            if skip.is_some_and(|s| !in_set(&frame.name, s)) {
                 return None;
             }
         }
         None
     }
-
     fn open_html(&mut self, name: JsString) {
         let closes = siblings(&name);
-        while let Some(top) = self.stack.last()
-            && top.element
-            && closes.is_some_and(|c| in_set(&top.name, c))
+        while self.top().is_some_and(|f| f.element)
+            && closes.is_some_and(|c| self.top().is_some_and(|f| in_set(&f.name, c)))
         {
             self.pop();
         }
         if in_hash(&name, &BLOCK)
-            && let Some(top) = self.stack.last()
-            && top.element
-            && eq(&top.name, "p")
+            && self.top().is_some_and(|f| f.element)
+            && self.top().is_some_and(|f| eq(&f.name, "p"))
         {
             self.pop();
         }
@@ -547,20 +744,23 @@ impl ForeignContent {
             self.push(name, false, true, true);
         }
     }
-
     fn push(&mut self, name: JsString, svg: bool, html: bool, element: bool) {
-        *self.open.entry(name.clone()).or_insert(0) += 1;
-        self.stack.push(Frame { name, svg, html, element });
-    }
-
-    fn pop(&mut self) {
-        if let Some(frame) = self.stack.pop()
-            && let Some(n) = self.open.get_mut(&frame.name)
-        {
-            *n -= 1;
+        let frame = Arc::new(ForeignFrame { name, svg, html, element });
+        self.open.entry(frame.name.clone()).or_default().push(self.stack.len());
+        self.stack.push(frame.clone());
+        if let Some(undo) = self.undo.as_mut() {
+            undo.push((false, frame));
         }
     }
-
+    fn pop(&mut self) {
+        self.touch(self.stack.len() as isize - 1);
+        if let Some(frame) = self.stack.pop() {
+            self.open.get_mut(&frame.name).expect("open index").pop();
+            if let Some(undo) = self.undo.as_mut() {
+                undo.push((true, frame));
+            }
+        }
+    }
     fn leave(&mut self) {
         while !self.html() {
             self.pop();
@@ -568,101 +768,325 @@ impl ForeignContent {
     }
 }
 
-fn raw_text_close(text: &[u16], from: usize, name: &str) -> Option<usize> {
+pub type CommentRead<'a> = Box<dyn FnMut(usize) -> Result<Option<usize>> + 'a>;
+pub type CommentFor = Arc<dyn for<'a> Fn(&'a [u16], CheckBudget<'a>) -> CommentRead<'a> + Send + Sync>;
+
+fn borrow_atom<'a>(atom: &'a mut AtomRead<'_>) -> AtomRead<'a> {
+    match atom {
+        Some(read) => Some(&mut **read),
+        None => None,
+    }
+}
+
+fn raw_text_close(
+    text: &[u16],
+    from: usize,
+    name: &str,
+    case_sensitive: bool,
+    check: CheckBudget<'_>,
+) -> Result<Option<usize>> {
     let mut i = from;
     while i < text.len() {
-        let lt = js::index_of(text, &[LT, SLASH], i)?;
-        if name_matches_at(text, lt + 2, name, NAME_END) {
-            return Some(lt);
+        check("raw-text-close")?;
+        let Some(lt) = js::index_of(text, &[LT, SLASH], i) else {
+            return Ok(None);
+        };
+        if (!case_sensitive || js::starts_with_at(text, &js::u(name), lt + 2))
+            && name_matches_at(text, lt + 2, name, NAME_END)
+        {
+            return Ok(Some(lt));
         }
         i = lt + 2;
     }
-    None
+    Ok(None)
 }
 
-pub fn tag_spans(text: &[u16], raw_text: Option<&[String]>) -> Vec<Span> {
-    let mut spans = Vec::new();
-    let n = text.len();
-    let raw_text = raw_text.filter(|r| !r.is_empty());
-    let scan_raw = raw_text.is_some();
-    let mut foreign = if scan_raw && FOREIGN_RE.test(text) { Some(ForeignContent::default()) } else { None };
-    let mut quiet_until = 0usize;
-    let mut absent_closers: HashSet<String> = HashSet::new();
-    let mut comment_close: Option<Option<usize>> = None;
-    let mut i = 0usize;
-    while i < n {
-        let Some(lt) = js::index_of_unit(text, LT, i) else { break };
-        i = lt;
-        let mut j = i + 1;
-        let closing = text.get(j) == Some(&SLASH);
-        if closing {
-            j += 1;
+pub struct TagRead {
+    pub span: Option<Span>,
+    pub after: usize,
+    pub mark: usize,
+    pub syntax: Vec<Range>,
+}
+impl TagRead {
+    fn absent(after: usize) -> Self {
+        Self { span: None, after, mark: 0, syntax: Vec::new() }
+    }
+}
+
+pub struct TagSpanReader<'a> {
+    text: &'a [u16],
+    raw_text: &'a [String],
+    case_sensitive: bool,
+    read_comment: Option<CommentRead<'a>>,
+    mode: Reading,
+    check: CheckBudget<'a>,
+    foreign: Option<ForeignContent<'a>>,
+    quiet_until: usize,
+    absent_closers: HashMap<String, usize>,
+    ends: [Option<Vec<isize>>; 4],
+    furthest: [isize; 4],
+    comments: Option<HashMap<usize, Option<usize>>>,
+    quiet_stack: Vec<usize>,
+    xml_names: bool,
+}
+impl<'a> TagSpanReader<'a> {
+    pub fn new(
+        text: &'a [u16],
+        raw_text: &'a [String],
+        case_sensitive: bool,
+        read_comment: Option<CommentRead<'a>>,
+        mode: Reading,
+        check: CheckBudget<'a>,
+        xml_names: bool,
+    ) -> Self {
+        let foreign = (!raw_text.is_empty() && FOREIGN_RE.test(text)).then(|| ForeignContent::new(check));
+        Self {
+            text,
+            raw_text,
+            case_sensitive,
+            read_comment,
+            mode,
+            check,
+            foreign,
+            quiet_until: 0,
+            absent_closers: HashMap::new(),
+            ends: std::array::from_fn(|_| None),
+            furthest: [-1; 4],
+            comments: None,
+            quiet_stack: Vec::new(),
+            xml_names,
         }
-        if !is_tag_name_start(js::code_point_at(text, j)) {
-            i += 1;
-            continue;
+    }
+    pub fn context(&self) -> ForeignContext {
+        self.foreign.as_ref().and_then(ForeignContent::context)
+    }
+    pub fn scope(&self) -> Scope {
+        (self.quiet_until, self.context().map(|f| (f.name.clone(), f.svg, f.html, f.element)))
+    }
+    pub fn depth(&self) -> usize {
+        self.foreign.as_ref().map_or(0, |f| f.stack.len())
+    }
+    pub fn mark(&self) -> usize {
+        self.foreign.as_ref().map_or(0, ForeignContent::mark)
+    }
+    pub fn begin(&mut self) {
+        self.quiet_stack.push(self.quiet_until);
+        if let Some(f) = self.foreign.as_mut() {
+            f.begin();
         }
-        let start = i;
-        let name_start = j;
-        if foreign.as_ref().is_some_and(ForeignContent::cdata)
-            && start >= quiet_until
+    }
+    pub fn finish(&mut self, keep: bool, through: Option<usize>) -> Result<Vec<isize>> {
+        let minimums = match self.foreign.as_mut() {
+            Some(f) => f.finish(keep, through)?,
+            None => vec![0],
+        };
+        let quiet = self.quiet_stack.pop().expect("tag transaction");
+        if !keep {
+            self.quiet_until = quiet;
+        }
+        Ok(minimums)
+    }
+    pub fn next(&self, from: usize) -> Result<Option<(usize, usize, usize)>> {
+        let mut cursor = from;
+        while let Some(at) = js::index_of_unit(self.text, LT, cursor) {
+            (self.check)("tag-opener")?;
+            let name_start = at + if self.text.get(at + 1) == Some(&SLASH) { 2 } else { 1 };
+            if is_tag_name_start(js::code_point_at(self.text, name_start), self.xml_names) {
+                return Ok(Some((at, at, at)));
+            }
+            cursor = at + 1;
+        }
+        Ok(None)
+    }
+    pub fn read(
+        &mut self,
+        start: usize,
+        tag_close: Option<isize>,
+        mut atom: AtomRead<'_>,
+        limit: Option<usize>,
+    ) -> Result<TagRead> {
+        (self.check)("tag-read")?;
+        let text = self.text;
+        let n = text.len();
+        let closing = text.get(start + 1) == Some(&SLASH);
+        let name_start = start + if closing { 2 } else { 1 };
+        if opens_declaration(text.get(name_start).copied()) {
+            atom = None;
+        }
+        let inline = limit.is_some() && !opens_declaration(text.get(name_start).copied());
+        let mode = if inline { Reading::Markdown } else { self.mode };
+        let flavor = usize::from(atom.is_some()) + if inline { 2 } else { 0 };
+        let mut i;
+        let xml_end = if self.xml_names && opens_declaration(text.get(start + 1).copied()) {
+            crate::input::xml::xml_construct_end(text, start, self.check)?
+        } else {
+            None
+        };
+        if let Some(xml_end) = xml_end {
+            i = xml_end - 1;
+        } else if self.foreign.as_mut().is_some_and(ForeignContent::cdata)
+            && start >= self.quiet_until
             && js::starts_with_at(text, &js::u("<![CDATA["), start)
         {
-            i = match js::index_of(text, &js::u("]]>"), start + 9) {
-                None => n,
-                Some(close) => close + 2,
-            };
+            i = js::index_of(text, &js::u("]]>"), start + 9).map_or(n, |p| p + 2);
         } else if !closing && js::starts_with_at(text, COMMENT_OPEN, start) {
-            let mut close = empty_comment_close(text, start);
-            if close.is_none() {
-                let stale = match comment_close {
-                    None => true,
-                    Some(None) => false,
-                    Some(Some(c)) => c < start + COMMENT_OPEN.len(),
-                };
-                if stale {
-                    comment_close = Some(js::index_of(text, COMMENT_CLOSE, start + COMMENT_OPEN.len()));
+            if self.read_comment.is_none() && self.comments.is_none() {
+                let mut comments = HashMap::new();
+                let mut next: Option<Option<usize>> = None;
+                let mut from = 0;
+                while let Some(at) = js::index_of(text, COMMENT_OPEN, from) {
+                    (self.check)("html-comment-ends")?;
+                    from = at + 1;
+                    let close = empty_comment_close(text, at).or_else(|| {
+                        if next.is_none_or(|c| c.is_some_and(|p| p < at + COMMENT_OPEN.len())) {
+                            next = Some(js::index_of(text, COMMENT_CLOSE, at + COMMENT_OPEN.len()));
+                        }
+                        next.flatten()
+                    });
+                    comments.insert(at, close);
                 }
-                close = comment_close.flatten();
+                self.comments = Some(comments);
             }
-            match close {
-                None => {
-                    quiet_until = n;
-                    i = start + 1;
-                    continue;
+            let close = match self.read_comment.as_mut() {
+                Some(read) => read(start)?,
+                None => self.comments.as_ref().and_then(|c| c.get(&start)).copied().flatten(),
+            };
+            let Some(close) = close else {
+                if self.read_comment.is_none() {
+                    self.quiet_until = n;
                 }
-                Some(close) => i = close + COMMENT_CLOSE.len() - 1,
-            }
+                return Ok(TagRead::absent(start + 1));
+            };
+            i = close + COMMENT_CLOSE.len() - 1;
         } else {
-            let gt = tag_end(text, name_start, Reading::Html);
+            if (start as isize) < self.furthest[flavor] && self.ends[flavor].is_none() {
+                self.ends[flavor] = Some(tag_ends_with(text, 0, mode, self.check, borrow_atom(&mut atom))?);
+            }
+            let gt = match tag_close {
+                Some(gt) => gt,
+                None => match self.ends[flavor].as_ref() {
+                    Some(ends) => ends[name_start],
+                    None => tag_end_with(text, name_start, mode, self.check, borrow_atom(&mut atom))?,
+                },
+            };
+            self.furthest[flavor] = self.furthest[flavor].max(if gt == -1 { n as isize } else { gt });
+            if gt == FAILED {
+                return Ok(TagRead::absent(start + 1));
+            }
+            if gt == -1 {
+                if self.ends[flavor].is_none() {
+                    self.ends[flavor] = Some(tag_ends_with(text, 0, mode, self.check, borrow_atom(&mut atom))?);
+                }
+                if opens_declaration(text.get(name_start).copied()) {
+                    return Ok(TagRead::absent(start + 1));
+                }
+            }
             i = if gt == -1 { n } else { gt as usize };
+            if limit.is_some_and(|limit| i >= limit) && !opens_declaration(text.get(name_start).copied()) {
+                return Ok(TagRead::absent(start + 1));
+            }
         }
         let mut reading = ElementReading::Html;
-        if let Some(f) = foreign.as_mut()
-            && start >= quiet_until
+        let mark = self.mark();
+        if let Some(f) = self.foreign.as_mut()
+            && start >= self.quiet_until
             && !opens_declaration(text.get(name_start).copied())
         {
             if closing {
                 f.end(text, name_start);
             } else {
-                reading = f.start(text, name_start, start, i);
+                reading = f.start(text, name_start, start, i, borrow_atom(&mut atom))?;
             }
         }
-        spans.push(Span { start, end: i, opens_nothing: reading == ElementReading::OpensNothing });
+        let span = Span { start, end: i, opens_nothing: reading == ElementReading::OpensNothing };
         i += 1;
-        if let Some(raw) = raw_text
+        if !self.raw_text.is_empty()
             && !closing
             && reading == ElementReading::Html
-            && let Some(name) = raw_text_name_at(text, name_start, raw)
-            && !absent_closers.contains(name)
+            && let Some(name) = raw_text_name_at(text, name_start, self.raw_text, self.case_sensitive)
+            && i < self.absent_closers.get(name).copied().unwrap_or(usize::MAX)
         {
-            match raw_text_close(text, i, name) {
-                None => {
-                    absent_closers.insert(name.to_owned());
-                }
-                Some(close) => i = close,
+            if let Some(close) = raw_text_close(text, i, name, self.case_sensitive, self.check)? {
+                i = close;
+            } else {
+                self.absent_closers.insert(name.to_owned(), i);
             }
         }
+        let mut syntax = Vec::new();
+        if let Some(read) = atom.as_mut() {
+            let mut at = name_start;
+            while at <= span.end.min(n.saturating_sub(1)) {
+                if at & 0x3fff == 0 {
+                    (self.check)("tag-syntax")?;
+                }
+                if let Some(end) = read(at)?
+                    && end > at
+                    && end <= span.end + 1
+                {
+                    syntax.push((at, end));
+                    at = end;
+                } else {
+                    at += 1;
+                }
+            }
+        }
+        Ok(TagRead { span: Some(span), after: i, mark, syntax })
     }
-    spans
+}
+
+pub fn tag_spans(text: &[u16], raw_text: Option<&[String]>) -> Vec<Span> {
+    tag_spans_case(text, raw_text, false)
+}
+pub fn tag_spans_case(text: &[u16], raw_text: Option<&[String]>, case_sensitive: bool) -> Vec<Span> {
+    tag_spans_options(text, raw_text.unwrap_or_default(), case_sensitive, None, Reading::Document, &[], &|_| Ok(()))
+        .expect("unlimited scanner")
+}
+pub fn tag_spans_options(
+    text: &[u16],
+    raw_text: &[String],
+    case_sensitive: bool,
+    read_comment: Option<CommentRead<'_>>,
+    mode: Reading,
+    opaque: &[Range],
+    check: CheckBudget<'_>,
+) -> Result<Vec<Span>> {
+    tag_spans_limited(text, raw_text, case_sensitive, read_comment, mode, opaque, check, None, false)
+}
+#[allow(clippy::too_many_arguments)]
+pub fn tag_spans_limited(
+    text: &[u16],
+    raw_text: &[String],
+    case_sensitive: bool,
+    read_comment: Option<CommentRead<'_>>,
+    mode: Reading,
+    opaque: &[Range],
+    check: CheckBudget<'_>,
+    mut limit_at: Option<&mut dyn FnMut(usize) -> Result<Option<usize>>>,
+    xml_names: bool,
+) -> Result<Vec<Span>> {
+    let mut reader = TagSpanReader::new(text, raw_text, case_sensitive, read_comment, mode, check, xml_names);
+    let atoms: HashMap<_, _> = opaque.iter().copied().collect();
+    let mut atom_end = |at| Ok(atoms.get(&at).copied());
+    let mut spans = Vec::new();
+    let mut from = 0;
+    let mut skip = 0;
+    while let Some(candidate) = reader.next(from)? {
+        while skip < opaque.len() && opaque[skip].1 <= candidate.0 {
+            skip += 1;
+        }
+        if skip < opaque.len() && opaque[skip].0 <= candidate.0 {
+            from = opaque[skip].1;
+            continue;
+        }
+        let limit = match limit_at.as_mut() {
+            Some(limit_at) => limit_at(candidate.0)?,
+            None => None,
+        };
+        let token = reader.read(candidate.0, None, (!opaque.is_empty()).then_some(&mut atom_end), limit)?;
+        if let Some(span) = token.span {
+            spans.push(span);
+        }
+        from = token.after;
+    }
+    Ok(spans)
 }

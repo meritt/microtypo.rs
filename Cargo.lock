@@ -192,12 +192,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "microtypo-conformance"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "microtypo-core",
+ "serde_json",
+]
+
+[[package]]
 name = "microtypo-core"
 version = "0.1.0"
 dependencies = [
  "getrandom",
- "js-sys",
+ "microtypo-conformance",
  "regress",
+ "serde",
  "serde_json",
 ]
 
@@ -205,6 +215,7 @@ dependencies = [
 name = "microtypo-ffi"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "microtypo-core",
  "mimalloc",
  "serde_json",
@@ -217,7 +228,6 @@ dependencies = [
  "getrandom",
  "js-sys",
  "microtypo-core",
- "serde_json",
  "wasm-bindgen",
 ]
 

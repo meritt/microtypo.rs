@@ -4,33 +4,46 @@ use std::sync::{Arc, LazyLock};
 
 use crate::cat;
 use crate::errors::Result;
+use crate::input::markdown::{LineTicker, prose_paragraphs_options};
 use crate::js::{self, Caps, JsString, Re};
 use crate::protect::placeholders::{
     BREAKLINE, CLOSE, OPEN, OPEN_UNIT, PARAGRAPH_CLOSE, PARAGRAPH_OPEN, RESERVED_PUA_CLASS, TAG_PLACEHOLDER_SOURCE,
     TAIL_KINDS, TRANSPARENT_TAG_KINDS,
 };
+use crate::protect::placeholders::{CLOSE_UNIT, restore_paragraphs};
+use crate::protect::sequences::URL_CORE_SOURCE;
 use crate::protect::tags::NameMatcher;
 use crate::rule_runner::{Ctx, Replacement, Rule, RuleGroupDef};
 use crate::shared::block_tags::{BLOCK_TAG_NAMES, VOID_BLOCK_TAG_NAMES, VOID_TAG_NAMES, implied_end_tags};
-use crate::shared::glyphs::{MDASH, NBSP};
+use crate::shared::glyphs::{BDQUO, HELLIP, LAQUO, LDQUO, MDASH, NBSP, RAQUO, unit};
+use crate::shared::paragraph_boundaries::{PARAGRAPH_INDENT_SPLIT_RE, PARAGRAPH_SPLIT_RE};
+use crate::shared::rule_features::F;
 use crate::shared::strings::count;
+use crate::shared::strings::line_view;
 
 fn block_boundary_res(alternation: &str) -> [Re; 2] {
+    let tags = if alternation.is_empty() { String::new() } else { format!(r"<\/?(?:{alternation})>|") };
+    let boundary = format!("(?:{tags}{}|{})", js::lossy(&PARAGRAPH_OPEN), js::lossy(&PARAGRAPH_CLOSE));
+    let compile = if alternation.is_empty() { Re::new } else { Re::configured };
     [
-        Re::new(&format!(r"(?<![ \t])[ \t]*[\r\n][\r\n \t]*(?=<\/?(?:{alternation})>)"), "g"),
-        Re::new(&format!(r"(<\/?(?:{alternation})>)[ \t]*[\r\n][\r\n \t]*"), "g"),
+        compile(&format!(r"(?<![ \t])[ \t]*[\r\n][\r\n \t]*(?={boundary})"), "g"),
+        compile(&format!(r"({boundary})[ \t]*[\r\n][\r\n \t]*"), "g"),
     ]
 }
 
+static PARAGRAPH_BOUNDARY_RES: LazyLock<[Re; 2]> = LazyLock::new(|| block_boundary_res(""));
+
 fn after_author_break_re(alternation: &str) -> Re {
-    Re::new(&format!(r"(?<!<(?:{alternation})>)\n"), "g")
+    Re::configured(&format!(r"(?<!<(?:{alternation})>)\n"), "g")
 }
+
+static LINE_BREAK_RE: LazyLock<Re> = LazyLock::new(|| Re::new(r"\n", "g"));
 
 static ANY_TAG_LIFT_RE: LazyLock<Re> = LazyLock::new(|| Re::new(&TAG_PLACEHOLDER_SOURCE, "g"));
 
-const PARAGRAPH_SPLIT_SOURCE: &str = r"(?<![ \t])([ \t]+)?(\n)+([ \t]*)(\n)+";
+static URL_CORE_RE: LazyLock<Re> = LazyLock::new(|| Re::new(&format!("^{URL_CORE_SOURCE}"), ""));
 
-static PARAGRAPH_SPLIT_RE: LazyLock<Re> = LazyLock::new(|| Re::new(PARAGRAPH_SPLIT_SOURCE, "g"));
+const URL_TRAILING_MARKS: [u16; 4] = [0x2E, unit(HELLIP), unit(RAQUO), unit(LDQUO)];
 
 static EMPTY_PARAGRAPH_RE: LazyLock<Re> = LazyLock::new(|| {
     let (open, close) = (js::lossy(&PARAGRAPH_OPEN), js::lossy(&PARAGRAPH_CLOSE));
@@ -43,7 +56,8 @@ static PARAGRAPH_GAP_RE: LazyLock<Re> = LazyLock::new(|| {
 });
 
 static BLOCK_SCAN_RE: LazyLock<Re> =
-    LazyLock::new(|| Re::new(&format!("{}|{PARAGRAPH_SPLIT_SOURCE}", *TAG_PLACEHOLDER_SOURCE), "g"));
+    LazyLock::new(|| Re::new(&format!("{}|{}", *TAG_PLACEHOLDER_SOURCE, PARAGRAPH_SPLIT_RE.source()), "g"));
+static BLANK_LINE_RE: LazyLock<Re> = LazyLock::new(|| Re::new(PARAGRAPH_SPLIT_RE.source(), ""));
 
 static P_NAME_RE: LazyLock<Re> = LazyLock::new(|| Re::new("^p$", "i"));
 
@@ -103,15 +117,16 @@ struct Item {
     opens: bool,
     closed: bool,
     wrapped: bool,
+    breaks: bool,
 }
 
 impl Item {
     fn text(kind: Kind, i: usize) -> Self {
-        Item { kind, i, opens: false, closed: false, wrapped: false }
+        Item { kind, i, opens: false, closed: false, wrapped: false, breaks: false }
     }
 
     fn element(opens: bool, closed: bool, wrapped: bool) -> Self {
-        Item { kind: Kind::Element, i: usize::MAX, opens, closed, wrapped }
+        Item { kind: Kind::Element, i: usize::MAX, opens, closed, wrapped, breaks: false }
     }
 }
 
@@ -120,8 +135,28 @@ fn unwrap_paragraph(paragraph: &[u16]) -> JsString {
 }
 
 fn drop_empty_paragraphs(text: &[u16], gap: &[u16]) -> JsString {
-    let is_empty = |paragraph: &[u16]| !has_non_space(&js::replace_all_lit(&unwrap_paragraph(paragraph), gap, &[]));
-    EMPTY_PARAGRAPH_RE.replace_with(text, |m| if is_empty(m.whole()) { Vec::new() } else { m.whole().to_vec() })
+    let mut start = 0;
+    let mut kept: Option<JsString> = None;
+    for m in EMPTY_PARAGRAPH_RE.find_all(text) {
+        if has_non_space(&js::replace_all_lit(&unwrap_paragraph(m.whole()), gap, &[])) {
+            continue;
+        }
+        kept.get_or_insert_with(Vec::new).extend_from_slice(js::slice(text, start, m.index()));
+        start = m.end();
+        if m.index() >= gap.len()
+            && js::starts_with_at(text, gap, m.index() - gap.len())
+            && js::starts_with_at(text, gap, start)
+        {
+            start += gap.len();
+        }
+    }
+    match kept {
+        Some(mut kept) => {
+            kept.extend_from_slice(js::from(text, start));
+            kept
+        }
+        None => text.to_vec(),
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -239,6 +274,22 @@ fn as_written(segment: &[Item]) -> bool {
     segment.iter().any(|item| item.wrapped)
 }
 
+fn faces_block(segment: &[Item], item: Option<&Item>) -> bool {
+    !as_written(segment) || item.is_some_and(|item| item.kind == Kind::Element)
+}
+
+fn line_break_at(s: &[u16], at: isize, step: isize) -> bool {
+    let mut i = at;
+    while let Some(&c) = usize::try_from(i).ok().and_then(|i| s.get(i)) {
+        match c {
+            0x0A | 0x0D => return true,
+            0x20 | 0x09 => i += step,
+            _ => return false,
+        }
+    }
+    false
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Edge {
     Head,
@@ -264,12 +315,12 @@ fn do_paragraphs(
     let split = |p1: Option<&[u16]>| cat!(p1, PARAGRAPH_CLOSE, gap, PARAGRAPH_OPEN);
     let result;
     if elements.is_empty() {
-        result = PARAGRAPH_SPLIT_RE.replace_with(text, |m| split(m.get(1)));
+        result = PARAGRAPH_INDENT_SPLIT_RE.replace_with(text, |m| split(m.get(1)));
     } else {
         let mut holder = Holder::default();
         let tags = ANY_TAG_LIFT_RE.find_all(text);
         let mut t = 0;
-        result = PARAGRAPH_SPLIT_RE.replace_with(text, |m| {
+        result = PARAGRAPH_INDENT_SPLIT_RE.replace_with(text, |m| {
             read_to(&tags, &mut t, m.index(), elements, &mut holder);
             if inside_element(&holder) { m.whole().to_vec() } else { split(m.get(1)) }
         });
@@ -369,6 +420,14 @@ fn solid(out: &[JsString], item: &Item) -> bool {
     item.kind == Kind::Element || (item.kind == Kind::Prose && has_non_space(&out[item.i]))
 }
 
+fn spaces(out: &[JsString], item: &Item) -> bool {
+    item.kind == Kind::Prose && out[item.i].iter().all(|&c| c == 0x20 || c == 0x09)
+}
+
+fn has_line_break(s: &[u16]) -> bool {
+    s.iter().any(|&c| c == 0x0A || c == 0x0D)
+}
+
 fn ends_closed(out: &[JsString], names: &HashMap<JsString, JsString>, item: &Item) -> bool {
     if item.kind == Kind::Element {
         return item.closed;
@@ -390,6 +449,7 @@ struct Chunk<'t> {
     stack: Vec<Frame>,
     cursor: usize,
     shaped: bool,
+    stray_break: bool,
 }
 
 impl Chunk<'_> {
@@ -401,7 +461,8 @@ impl Chunk<'_> {
         if end > self.cursor {
             self.out.push(self.text[self.cursor..end].to_vec());
             let i = self.out.len() - 1;
-            self.top().items.push(Item::text(Kind::Prose, i));
+            let breaks = std::mem::take(&mut self.stray_break);
+            self.top().items.push(Item { breaks, ..Item::text(Kind::Prose, i) });
         }
     }
 
@@ -452,13 +513,27 @@ impl Chunk<'_> {
         }
         let from = segment.iter().position(|item| solid(&self.out, item)).expect("an element is solid");
         let to = segment.iter().rposition(|item| solid(&self.out, item)).expect("an element is solid");
-        let bare = segment[from].opens && ends_closed(&self.out, self.names, &segment[to]);
+        let element_at =
+            |k: Option<usize>| k.and_then(|k| segment.get(k)).is_some_and(|item| item.kind == Kind::Element);
+        let breaks = |item: &Item, k: usize| {
+            item.kind == Kind::Prose
+                && solid(&self.out, item)
+                && (item.breaks
+                    || (element_at(k.checked_sub(1)) && line_break_at(&self.out[item.i], 0, 1))
+                    || (element_at(Some(k + 1))
+                        && line_break_at(&self.out[item.i], self.out[item.i].len() as isize - 1, -1)))
+        };
+        let bare = segment[from].opens
+            && ends_closed(&self.out, self.names, &segment[to])
+            && !segment[from..=to].iter().enumerate().any(|(k, item)| breaks(item, from + k));
         for (k, item) in segment.iter().enumerate() {
             if item.kind == Kind::Element {
                 continue;
             }
             if k < from || k > to {
                 self.out[item.i] = Vec::new();
+            } else if !solid(&self.out, item) && has_line_break(&self.out[item.i]) {
+                self.out[item.i].clone_from(&self.gap);
             } else if bare {
                 if k == to {
                     self.out[item.i] = js::trim_end(&self.out[item.i]).to_vec();
@@ -513,8 +588,16 @@ impl Chunk<'_> {
             }
         }
         for (k, run) in runs.iter().enumerate() {
-            self.out[run.i] =
-                if as_written(&segments[k]) || as_written(&segments[k + 1]) { Vec::new() } else { self.gap.clone() };
+            let (before, after) = (&segments[k], &segments[k + 1]);
+            let block = faces_block(before, before.iter().rev().find(|item| !spaces(&self.out, item)))
+                || faces_block(after, after.iter().find(|item| !spaces(&self.out, item)));
+            self.out[run.i] = if block { self.gap.clone() } else { Vec::new() };
+            if block
+                && as_written(after)
+                && let Some(first) = after.first().filter(|item| item.kind == Kind::Prose)
+            {
+                self.out[first.i] = trim_ascii_indent(&self.out[first.i]).to_vec();
+            }
         }
         let is_run = |item: &Item| item.kind == Kind::Run;
         let leads = match from {
@@ -532,15 +615,30 @@ impl Chunk<'_> {
     }
 }
 
+fn trim_ascii_indent(s: &[u16]) -> &[u16] {
+    let start = s.iter().position(|&c| !matches!(c, 0x20 | 0x09)).unwrap_or(s.len());
+    &s[start..]
+}
+
+fn normalize_newlines(s: &[u16]) -> JsString {
+    js::replace_all_lit(&js::replace_all_lit(s, &[0x0D, 0x0A], &[0x0A]), &[0x0D], &[0x0A])
+}
+
+fn beside(ctx: &mut Ctx<'_>, blank: bool) -> Result<JsString> {
+    if blank { ctx.iblock(&js::u("\n\n")) } else { Ok(js::u("\n")) }
+}
+
 fn flat(
     text: &[u16],
     ctx: &mut Ctx<'_>,
     elements: &HashMap<JsString, JsString>,
     edge: Option<Edge>,
     facing: &[u16],
+    blank: bool,
 ) -> Result<(JsString, JsString)> {
     let (text, inside) = do_paragraphs(text, ctx, elements, edge)?;
-    Ok((text, if inside { facing.to_vec() } else { js::u("\n") }))
+    let sep = if inside { facing.to_vec() } else { beside(ctx, blank)? };
+    Ok((text, sep))
 }
 
 fn paragraph_chunk(
@@ -550,8 +648,7 @@ fn paragraph_chunk(
     edge: Option<Edge>,
     mut outer: Holder,
 ) -> Result<(JsString, JsString)> {
-    let text =
-        js::trim(&js::replace_all_lit(&js::replace_all_lit(raw, &[0x0D, 0x0A], &[0x0A]), &[0x0D], &[0x0A])).to_vec();
+    let mut text = js::trim(&normalize_newlines(raw)).to_vec();
     if text.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -560,10 +657,16 @@ fn paragraph_chunk(
     } else {
         raw[..raw.len() - js::trim_start(raw).len()].to_vec()
     };
+    let normalized_facing = normalize_newlines(&facing);
+    let blank = BLANK_LINE_RE.test(&normalized_facing);
     let elements = &names.elements;
     let starts_inside = inside_element(&outer);
+    if edge == Some(Edge::Tail) && blank && !starts_inside {
+        let line = normalized_facing.iter().rposition(|&c| c == 0x0A).map_or(0, |at| at + 1);
+        text = cat!(trim_ascii_indent(&normalized_facing[line..]), text);
+    }
     if names.blocks.is_empty() && !starts_inside {
-        return flat(&text, ctx, elements, edge, &facing);
+        return flat(&text, ctx, elements, edge, &facing, blank);
     }
     let gap = ctx.iblock(&js::u("\n\n"))?;
     let mut c = Chunk {
@@ -575,8 +678,9 @@ fn paragraph_chunk(
         stack: vec![Frame::root(starts_inside)],
         cursor: 0,
         shaped: false,
+        stray_break: false,
     };
-    let mut sep = if starts_inside { facing.clone() } else { js::u("\n") };
+    let mut sep = if starts_inside { facing.clone() } else { beside(ctx, blank)? };
 
     for m in BLOCK_SCAN_RE.find_all(&text) {
         let token = m.whole();
@@ -606,6 +710,12 @@ fn paragraph_chunk(
         if slash && c.open.get(name).copied().unwrap_or(0) == 0 {
             if track_element(&mut outer, name, true) {
                 c.restart(m.index(), token, &outer);
+            } else if c.stack.len() == 1
+                && !inside_element(&c.top().holder)
+                && (line_break_at(&text, m.index() as isize - 1, -1)
+                    || line_break_at(&text, (m.index() + token.len()) as isize, 1))
+            {
+                c.stray_break = true;
             }
             continue;
         }
@@ -647,7 +757,11 @@ fn paragraph_chunk(
 
     c.prose(text.len());
     if !c.shaped {
-        return if starts_inside { Ok((text.clone(), facing)) } else { flat(&text, ctx, elements, edge, &facing) };
+        return if starts_inside {
+            Ok((text.clone(), facing))
+        } else {
+            flat(&text, ctx, elements, edge, &facing, blank)
+        };
     }
     let ends_inside = edge == Some(Edge::Head) && inside_element(&c.stack[0].holder);
     if edge == Some(Edge::Head) && (c.stack.len() > 1 || ends_inside) {
@@ -682,7 +796,253 @@ fn around_tail(text: &[u16], mut lay_out: impl FnMut(&[u16], bool) -> Result<JsS
     }
 }
 
+pub struct MarkdownSource {
+    header: bool,
+    mdx: bool,
+    layout: Option<MarkdownLayout>,
+}
+
+impl MarkdownSource {
+    pub fn new(header: bool, mdx: bool) -> Self {
+        MarkdownSource { header, mdx, layout: None }
+    }
+}
+
+struct MarkdownLayout {
+    line: Vec<isize>,
+    hard: Vec<bool>,
+    wrap: Vec<bool>,
+}
+
+const LINE_MARK: u16 = 0xFFFF;
+
+fn restore_line(ctx: &Ctx<'_>, line: &[u16]) -> JsString {
+    ctx.restore_protected(restore_paragraphs(line.to_vec()), false)
+}
+
+fn markdown_layout(text: &[u16], ctx: &Ctx<'_>, header: bool, mdx: bool) -> Result<MarkdownLayout> {
+    markdown_layout_with(text, &mut |line| restore_line(ctx, line), ctx.check_budget, header, mdx)
+}
+
+pub(crate) struct EdgeReader {
+    header: bool,
+    mdx: bool,
+    marks: Option<(Vec<bool>, Vec<bool>)>,
+}
+
+impl EdgeReader {
+    pub(crate) fn new(header: bool, mdx: bool) -> Self {
+        EdgeReader { header, mdx, marks: None }
+    }
+}
+
+pub(crate) fn paragraph_edges(
+    reader: &mut EdgeReader,
+    text: &[u16],
+    restore: &mut dyn FnMut(&[u16]) -> JsString,
+    check_budget: &dyn Fn(&str) -> Result<()>,
+) -> Result<Vec<usize>> {
+    let mut starts = vec![0usize];
+    starts.extend(text.iter().enumerate().filter(|&(_, &c)| c == 0x0A).map(|(at, _)| at + 1));
+    if reader.marks.as_ref().is_none_or(|(opens, _)| opens.len() != starts.len()) {
+        let layout = markdown_layout_with(text, restore, check_budget, reader.header, reader.mdx)?;
+        let line_at = |t: isize| if t < 0 { None } else { layout.line.get(t as usize).copied() };
+        let mut opens = vec![false; starts.len()];
+        let mut closes = vec![false; starts.len()];
+        for t in 0..starts.len() {
+            let p = layout.line.get(t).copied().unwrap_or(-1);
+            if p != -1 && layout.wrap.get(p as usize).copied().unwrap_or(false) {
+                opens[t] = line_at(t as isize - 1) != Some(p);
+                closes[t] = line_at(t as isize + 1) != Some(p);
+            }
+        }
+        reader.marks = Some((opens, closes));
+    }
+    let Some((opens, closes)) = reader.marks.as_ref() else { return Ok(Vec::new()) };
+    let mut edges = Vec::new();
+    for t in 0..starts.len() {
+        if opens[t] && t > 0 {
+            edges.push(starts[t]);
+        }
+        if closes[t] && t + 1 < starts.len() {
+            edges.push(starts[t + 1] - 1);
+        }
+    }
+    Ok(edges)
+}
+
+fn markdown_layout_with(
+    text: &[u16],
+    restore: &mut dyn FnMut(&[u16]) -> JsString,
+    check_budget: &dyn Fn(&str) -> Result<()>,
+    header: bool,
+    mdx: bool,
+) -> Result<MarkdownLayout> {
+    let lines = js::split(text, &[0x0A]);
+    let marked: JsString = text.iter().map(|&c| if c == 0x0A { LINE_MARK } else { c }).collect();
+    let restored = restore(&marked);
+    let mut pieces: Vec<JsString> = restored.split(|&c| c == LINE_MARK).map(<[u16]>::to_vec).collect();
+    if pieces.len() != lines.len() {
+        pieces = lines.iter().map(|l| restore(l)).collect();
+    }
+    let document = line_view(&js::join(&pieces, &[0x0A]));
+    let prose = prose_paragraphs_options(&document, header, check_budget, mdx)?;
+    let mut line = vec![-1isize; pieces.len()];
+    let mut hard = vec![false; pieces.len()];
+    let mut wrap = prose.closed.clone();
+    let mut tick = LineTicker::new(check_budget, "md-layout");
+    let mut r = 0usize;
+    let mut at = 0usize;
+    for (t, piece) in pieces.iter().enumerate() {
+        tick.tick()?;
+        let end = at + piece.len();
+        let last = r + document[at.min(document.len())..end.min(document.len())].iter().filter(|&&c| c == 0x0A).count();
+        let p = prose.paragraph.get(r).copied().unwrap_or(-1);
+        let own = p != -1 && (r + 1..=last).all(|q| prose.paragraph.get(q).copied().unwrap_or(-1) == p);
+        if own {
+            line[t] = p;
+            hard[t] = prose.hard.get(last).copied().unwrap_or(false);
+        } else {
+            for q in r..=last {
+                if let Some(&k) = prose.paragraph.get(q)
+                    && k != -1
+                {
+                    wrap[k as usize] = false;
+                }
+            }
+        }
+        r = last + 1;
+        at = end + 1;
+    }
+    Ok(MarkdownLayout { line, hard, wrap })
+}
+
+fn is_blank_unit(c: Option<u16>) -> bool {
+    matches!(c, Some(0x20 | 0x09))
+}
+
+fn blank_restored(ctx: &Ctx<'_>, s: &[u16]) -> bool {
+    restore_line(ctx, s).iter().all(|&c| c == 0x20 || c == 0x09)
+}
+
+fn content_bounds(line: &[u16], ctx: &Ctx<'_>, tick: &mut LineTicker<'_>) -> Result<(usize, usize)> {
+    let mut start = 0;
+    let mut end = line.len();
+    while start < end {
+        tick.tick()?;
+        let close =
+            if line[start] == OPEN_UNIT { js::index_of_unit(line, CLOSE_UNIT, start).map_or(0, |p| p + 1) } else { 0 };
+        if is_blank_unit(line.get(start).copied()) {
+            start += 1;
+        } else if close > 0 && blank_restored(ctx, &line[start..close]) {
+            start = close;
+        } else {
+            break;
+        }
+    }
+    while end > start {
+        tick.tick()?;
+        let open = if line[end - 1] == CLOSE_UNIT { line[..end].iter().rposition(|&c| c == OPEN_UNIT) } else { None };
+        if is_blank_unit(line.get(end - 1).copied()) {
+            end -= 1;
+        } else if let Some(open) = open.filter(|&o| o >= start)
+            && blank_restored(ctx, &line[open..end])
+        {
+            end = open;
+        } else {
+            break;
+        }
+    }
+    Ok((start, end))
+}
+
+fn markdown_paragraphs(text: &[u16], layout: &MarkdownLayout, ctx: &Ctx<'_>) -> Result<JsString> {
+    let lines = js::split(text, &[0x0A]);
+    let mut tick = LineTicker::new(ctx.check_budget, "md-paragraphs");
+    let mut last = lines.len() - 1;
+    while last > 0 {
+        let (start, end) = content_bounds(lines[last], ctx, &mut tick)?;
+        if start != end {
+            break;
+        }
+        last -= 1;
+    }
+    let at = |t: Option<usize>| t.and_then(|t| layout.line.get(t).copied());
+    let mut out: Vec<JsString> = Vec::with_capacity(lines.len());
+    for (t, &s) in lines.iter().enumerate() {
+        tick.tick()?;
+        let p = layout.line.get(t).copied().unwrap_or(-1);
+        if p == -1 || !layout.wrap[p as usize] {
+            out.push(s.to_vec());
+            continue;
+        }
+        let opens = at(t.checked_sub(1)) != Some(p);
+        let closes = at(Some(t + 1)) != Some(p);
+        if !opens && !closes {
+            out.push(s.to_vec());
+            continue;
+        }
+        let (start, end) = content_bounds(s, ctx, &mut tick)?;
+        let from = if opens { start } else { 0 };
+        let to = if closes { end } else { s.len() };
+        let tail: &[u16] = if closes && t == last { &[] } else { &s[to..] };
+        let open: &[u16] = if opens { &PARAGRAPH_OPEN } else { &[] };
+        let close: &[u16] = if closes { &PARAGRAPH_CLOSE } else { &[] };
+        out.push(cat!(&s[..from], open, &s[from..to], close, tail));
+    }
+    Ok(js::join(&out, &[0x0A]))
+}
+
+fn markdown_breaklines(text: &[u16], layout: &MarkdownLayout, names: &TagNames, ctx: &Ctx<'_>) -> Result<JsString> {
+    let breaks: HashSet<JsString> = names.breaks.iter().map(|ph| cat!("<", ph, ">")).collect();
+    let mut tick = LineTicker::new(ctx.check_budget, "md-breaklines");
+    let mut top: Vec<(usize, usize)> = Vec::new();
+    top_level(text, names, &mut |from, to| {
+        top.push((from, to));
+        Ok(())
+    })?;
+    let mut at = 0usize;
+    let mut s = 0usize;
+    let mut out: Vec<JsString> = Vec::new();
+    for (t, piece) in js::split(text, &[0x0A]).into_iter().enumerate() {
+        tick.tick()?;
+        let nl = at + piece.len();
+        at = nl + 1;
+        let here = layout.line.get(t).copied().unwrap_or(-1);
+        if here == -1 || layout.line.get(t + 1).copied() != Some(here) || layout.hard.get(t).copied().unwrap_or(false) {
+            out.push(piece.to_vec());
+            continue;
+        }
+        while s < top.len() && top[s].1 <= nl {
+            s += 1;
+        }
+        let end = js::trim_end(piece);
+        let tag: &[u16] = if end.ends_with(&[CLOSE_UNIT, 0x3E]) {
+            match js::last_index_of(end, &[0x3C, OPEN_UNIT]) {
+                Some(p) => &end[p..],
+                None => &end[end.len() - 1..],
+            }
+        } else {
+            &[]
+        };
+        out.push(if s == top.len() || top[s].0 > nl || breaks.contains(tag) {
+            piece.to_vec()
+        } else {
+            cat!(piece, BREAKLINE)
+        });
+    }
+    Ok(js::join(&out, &[0x0A]))
+}
+
 fn build_paragraphs(ctx: &mut Ctx<'_>) -> Result<Option<JsString>> {
+    if let Some((header, mdx)) = ctx.markdown.as_ref().map(|m| (m.header, m.mdx)) {
+        let layout = markdown_layout(&ctx.text, ctx, header, mdx)?;
+        ctx.text = markdown_paragraphs(&ctx.text, &layout, ctx)?;
+        if let Some(source) = ctx.markdown.as_mut() {
+            source.layout = Some(layout);
+        }
+        return Ok(None);
+    }
     let names = tag_names(ctx);
     let text = ctx.text.clone();
     ctx.text = around_tail(&text, |text, runs_on| lay_out_paragraphs(text, ctx, &names, runs_on))?;
@@ -720,6 +1080,15 @@ fn lay_out_paragraphs(text: &[u16], ctx: &mut Ctx<'_>, names: &TagNames, runs_on
 
 fn build_breaklines(ctx: &mut Ctx<'_>) -> Result<Option<JsString>> {
     let names = tag_names(ctx);
+    if let Some(source) = ctx.markdown.as_mut() {
+        let (header, mdx, read) = (source.header, source.mdx, source.layout.take());
+        let layout = match read {
+            Some(layout) => layout,
+            None => markdown_layout(&ctx.text, ctx, header, mdx)?,
+        };
+        ctx.text = markdown_breaklines(&ctx.text, &layout, &names, ctx)?;
+        return Ok(None);
+    }
     let text = ctx.text.clone();
     ctx.text = around_tail(&text, |text, _| breaklines(text, ctx, &names))?;
     Ok(None)
@@ -736,6 +1105,9 @@ fn break_top(
         let inner = if ws.iter().any(|&c| c == 0x0A || c == 0x0D) { js::u("\n\n") } else { ws.to_vec() };
         Ok(cat!(m.s(1), ctx.iblock(&inner)?, m.s(3)))
     })?;
+    s = PARAGRAPH_SPLIT_RE.try_replace_with(&s, |m| {
+        if s[m.end()..].starts_with(&PARAGRAPH_OPEN) { ctx.iblock(&js::u("\n\n")) } else { Ok(m.whole().to_vec()) }
+    })?;
     if let Some([before_block, after_block]) = boundaries {
         s = before_block.try_replace_with(&s, |_| ctx.iblock(&js::u("\n\n")))?;
         s = after_block.try_replace_with(&s, |m| Ok(cat!(m.s(1), ctx.iblock(&js::u("\n\n"))?)))?;
@@ -748,25 +1120,38 @@ fn break_top(
 
 fn breaklines(text: &[u16], ctx: &mut Ctx<'_>, names: &TagNames) -> Result<JsString> {
     let alternation = |phs: &[JsString]| js::lossy(&js::join(phs, &[0x7C]));
+    let named_boundaries;
     let boundaries =
-        if names.blocks.is_empty() { None } else { Some(block_boundary_res(&alternation(&names.block_order))) };
+        if !names.blocks.is_empty() || js::includes(text, &PARAGRAPH_OPEN) || js::includes(text, &PARAGRAPH_CLOSE) {
+            let tags = alternation(&names.block_order);
+            Some(if tags.is_empty() {
+                &*PARAGRAPH_BOUNDARY_RES
+            } else {
+                named_boundaries = block_boundary_res(&tags);
+                &named_boundaries
+            })
+        } else {
+            None
+        };
+    let author_break;
     let line_break = if js::includes(text, &BREAKLINE) {
         None
     } else if names.breaks.is_empty() {
-        Some(Re::new(r"\n", "g"))
+        Some(&*LINE_BREAK_RE)
     } else {
-        Some(after_author_break_re(&alternation(&names.breaks)))
+        author_break = after_author_break_re(&alternation(&names.breaks));
+        Some(&author_break)
     };
-    let mut parts: Vec<JsString> = Vec::new();
+    let mut out = Vec::with_capacity(text.len());
     let mut last = 0usize;
     top_level(text, names, &mut |from, to| {
-        parts.push(js::slice(text, last, from).to_vec());
-        parts.push(break_top(js::slice(text, from, to), ctx, boundaries.as_ref(), line_break.as_ref())?);
+        out.extend_from_slice(js::slice(text, last, from));
+        out.extend(break_top(js::slice(text, from, to), ctx, boundaries, line_break)?);
         last = to;
         Ok(())
     })?;
-    parts.push(js::from(text, last).to_vec());
-    Ok(parts.concat())
+    out.extend_from_slice(js::from(text, last));
+    Ok(out)
 }
 
 fn pre_parse(ctx: &mut Ctx<'_>) -> Result<()> {
@@ -779,7 +1164,9 @@ fn pre_parse(ctx: &mut Ctx<'_>) -> Result<()> {
 
 pub fn text_group() -> RuleGroupDef {
     let autolink = Re::new(
-        &format!(r#"(\s|^)(http|ftp|mailto|https)(:\/\/)([^\s,!<>"'{RESERVED_PUA_CLASS}]{{4,}})(?=\s|\.|,|!|\?|<|$)"#),
+        &format!(
+            r#"(\s|^|[{LAQUO}{BDQUO}]|(?<!\])\()(http|ftp|mailto|https)(:\/\/)([^\s,!<>"'{RESERVED_PUA_CLASS}]{{4,}})(?=\s|\.|,|!|\?|<|$)"#
+        ),
         "giu",
     );
     let mut group = super::group(
@@ -790,21 +1177,29 @@ pub fn text_group() -> RuleGroupDef {
                 "autolink",
                 autolink,
                 Replacement::func(|m, ctx| {
-                    let mut body = m.s(4);
-                    let mut tail: JsString = Vec::new();
-                    while body.len() > 4
-                        && (body.last() == Some(&0x2E)
-                            || (body.last() == Some(&0x29) && count(body, &[0x28]) < count(body, &[0x29])))
-                    {
-                        tail = cat!(&body[body.len() - 1..], tail);
-                        body = &body[..body.len() - 1];
+                    let raw = m.s(4);
+                    let whole = URL_CORE_RE.exec(raw).map_or(raw, |c| c.whole());
+                    let opens = count(whole, &[0x28]);
+                    let mut closes = count(whole, &[0x29]);
+                    let mut end = whole.len();
+                    while end > 4 {
+                        let last = whole[end - 1];
+                        if last == 0x29 && opens < closes {
+                            closes -= 1;
+                        } else if !URL_TRAILING_MARKS.contains(&last) {
+                            break;
+                        }
+                        end -= 1;
                     }
+                    let body = &whole[..end];
                     let href = cat!(m.s(2), m.s(3), body);
-                    Ok(cat!(m.s(1), ctx.tag_with(body, "a", vec![("href".to_owned(), href)])?, tail))
+                    let link = ctx.tag_with(body, "a", vec![("href".to_owned(), href)])?;
+                    Ok(cat!(m.s(1), link, &whole[end..], &raw[whole.len()..]))
                 }),
             )
             .describe("Выделение ссылок из текста")
-            .html_only(),
+            .html_only()
+            .requires(F::COLON | F::SLASH),
             Rule::pattern(
                 "email",
                 Re::new(r"(\s|^|\()([a-z0-9\-_.]{2,})@([a-z0-9\-.]{2,})\.([a-z]{2,6})(?=\)|\s|\.|,|!|\?|$|<)", "giu"),
@@ -815,7 +1210,8 @@ pub fn text_group() -> RuleGroupDef {
                 }),
             )
             .describe("Выделение эл. почты из текста")
-            .html_only(),
+            .html_only()
+            .requires(F::PERIOD | F::AT),
             Rule::patterns(
                 "deduplicate_words",
                 vec![
@@ -834,7 +1230,8 @@ pub fn text_group() -> RuleGroupDef {
             )
             .describe("Удаление повторяющихся слов")
             .off()
-            .html_only(),
+            .html_only()
+            .requires(F::SPACE),
             Rule::handler("paragraphs", build_paragraphs).describe("Простановка параграфов").html_only(),
             Rule::handler("breakline", build_breaklines).describe("Простановка переносов строк").html_only(),
         ],
@@ -923,10 +1320,10 @@ mod tests {
         let cases = [
             ("Первый абзац.\n\nВторой абзац.", "<p>Первый абзац.</p>\n\n<p>Второй абзац.</p>"),
             ("Строка один\nстрока два", "<p>Строка один<br>\nстрока два</p>"),
-            ("  \n\nТекст\n\n\n  ещё\n", "<p>Текст</p>\n\n<p>  ещё</p>"),
+            ("  \n\nТекст\n\n\n  ещё\n", "<p>Текст</p>\n\n<p>ещё</p>"),
             (
                 "Смотрите http://example.com/path. и (https://ru.wikipedia.org/wiki/Foo_(bar)) тут",
-                "<p>Смотрите <a href=\"http://example.com/path\">example.com/path</a>. и (https://ru.wikipedia.org/wiki/Foo_(bar)) тут</p>",
+                "<p>Смотрите <a href=\"http://example.com/path\">example.com/path</a>. и (<a href=\"https://ru.wikipedia.org/wiki/Foo_(bar)\">ru.wikipedia.org/wiki/Foo_(bar)</a>) тут</p>",
             ),
             (
                 "Пишите на mail@example.ru или (info@test.com). и a@b.c",
@@ -982,7 +1379,7 @@ mod tests {
             ),
             (
                 "текст <div>блок</div> текст\n\nи <span><div>в</div></span>\n\nконец",
-                "<p>текст</p>\n\n<div>блок</div>\n\n<p>текст</p>и <span><div>в</div></span><p>конец</p>",
+                "<p>текст</p>\n\n<div>блок</div>\n\n<p>текст</p>\n\nи <span><div>в</div></span>\n\n<p>конец</p>",
             ),
             (
                 "<dl><dt>a<dd>b</dl>\n\n<blockquote>\nцитата\n\nвторая\n</blockquote>",
@@ -1005,7 +1402,7 @@ mod tests {
         let settings = serde_json::Map::new();
         let check_budget = |_: &str| Ok(());
         let blocks = SafeBlocks::default();
-        let sequences = SafeSequences::default();
+        let mut sequences = SafeSequences::new(|bytes| bytes.fill(0));
         let mut failures = Vec::new();
         for (input, expected) in cases {
             let mut tags = SafeTags::new(false);
@@ -1020,9 +1417,17 @@ mod tests {
                 on_cycle_limit: None,
                 safe_tags: &mut tags,
                 safe_blocks: &blocks,
-                safe_sequences: &sequences,
+                safe_sequences: &mut sequences,
                 prefix: "",
                 budget: None,
+                markdown: None,
+                authored_closers: None,
+                inline: None,
+                features: None,
+                trace: None,
+                trace_projection: None,
+                trace_escaped: None,
+                bound: crate::rule_runner::Bindings::default(),
             };
             let r = run_rule_group(&compiled, protected, &mut ctx).unwrap();
             let r = tags.restore(restore_paragraphs(tags.restore_iblocks(r)));

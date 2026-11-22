@@ -6,7 +6,120 @@ use crate::protect::blocks::{Range, ScanCtx};
 
 pub type Next<'a> = Box<dyn FnMut(usize) -> Result<Option<(usize, usize, usize)>> + 'a>;
 
-pub type ReaderFor = Arc<dyn for<'a> Fn(&'a [u16], &'a ScanCtx<'a>) -> Result<Next<'a>> + Send + Sync>;
+pub type ReaderFor = Arc<dyn for<'a> Fn(&'a [u16], &'a ScanCtx<'a>) -> Result<Box<dyn SpanReader + 'a>> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct OwnedSpan {
+    pub start: usize,
+    pub end: usize,
+    pub after: usize,
+    pub tail: bool,
+    pub report: Option<bool>,
+    pub syntax: Vec<Range>,
+}
+
+impl OwnedSpan {
+    pub fn new((start, end, after): (usize, usize, usize)) -> Self {
+        Self { start, end, after, tail: false, report: None, syntax: Vec::new() }
+    }
+}
+
+pub trait SpanReader {
+    fn next(&mut self, from: usize) -> Result<Option<(usize, usize, usize)>>;
+    fn read(&mut self, at: usize) -> Result<OwnedSpan>;
+    fn header(&mut self, _at: usize) -> Result<Option<usize>> {
+        Ok(None)
+    }
+    fn address(&self) -> bool {
+        false
+    }
+}
+
+pub fn precedes_inline(
+    candidate: (usize, usize, usize),
+    first: Option<(usize, usize, usize)>,
+    first_address: bool,
+) -> bool {
+    first.is_none_or(|first| candidate.0 < first.0 || (candidate.0 == first.0 && first_address))
+}
+
+pub struct NextReader<'a> {
+    next: Next<'a>,
+    at: Option<(usize, usize, usize)>,
+}
+impl<'a> NextReader<'a> {
+    pub fn new(next: Next<'a>) -> Self {
+        Self { next, at: None }
+    }
+}
+impl SpanReader for NextReader<'_> {
+    fn next(&mut self, from: usize) -> Result<Option<(usize, usize, usize)>> {
+        self.at = (self.next)(from)?;
+        Ok(self.at)
+    }
+    fn read(&mut self, at: usize) -> Result<OwnedSpan> {
+        Ok(OwnedSpan::new(self.at.filter(|s| s.0 == at).expect("selected candidate")))
+    }
+}
+
+#[cfg(test)]
+pub fn collect_owned(reader: &mut dyn SpanReader) -> Result<Vec<crate::protect::blocks::Spanned>> {
+    use crate::protect::blocks::SpanKind;
+    let mut spans = Vec::new();
+    let mut from = 0;
+    while let Some(at) = reader.next(from)? {
+        let span = reader.read(at.0)?;
+        if span.report != Some(false) {
+            spans.push((span.start, span.end, if span.tail { SpanKind::Tail } else { SpanKind::Plain }));
+        }
+        from = span.after;
+    }
+    Ok(spans)
+}
+
+#[derive(Clone, Copy)]
+enum Candidate {
+    Unqueried,
+    Exhausted,
+    Present((usize, usize, usize)),
+}
+
+pub struct LineReader<'a> {
+    readers: Vec<Box<dyn SpanReader + 'a>>,
+    candidates: Vec<Candidate>,
+    through: usize,
+}
+impl<'a> LineReader<'a> {
+    pub fn new(readers: Vec<Box<dyn SpanReader + 'a>>) -> Self {
+        Self { candidates: vec![Candidate::Unqueried; readers.len()], readers, through: 0 }
+    }
+    pub fn read(&mut self, from: usize, to: usize) -> Result<usize> {
+        let mut cursor = from.max(self.through);
+        while cursor < to {
+            let mut first: Option<(usize, (usize, usize, usize))> = None;
+            let mut first_address = false;
+            for (k, reader) in self.readers.iter_mut().enumerate() {
+                if matches!(self.candidates[k], Candidate::Unqueried)
+                    || matches!(self.candidates[k], Candidate::Present(at) if at.0 < cursor)
+                {
+                    self.candidates[k] = reader.next(cursor)?.map_or(Candidate::Exhausted, Candidate::Present);
+                }
+                if let Candidate::Present(at) = self.candidates[k]
+                    && precedes_inline(at, first.map(|(_, f)| f), first_address)
+                {
+                    first = Some((k, at));
+                    first_address = reader.address();
+                }
+            }
+            let Some((k, at)) = first.filter(|(_, at)| at.0 < to) else {
+                break;
+            };
+            cursor = self.readers[k].read(at.0)?.after;
+            self.through = cursor;
+        }
+        Ok(self.through)
+    }
+}
 
 pub fn collect_spans(next: &mut Next<'_>) -> Result<Vec<Range>> {
     let mut spans = Vec::new();
@@ -18,7 +131,7 @@ pub fn collect_spans(next: &mut Next<'_>) -> Result<Vec<Range>> {
     Ok(spans)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Position {
     Key(JsString),
     Index(usize),
@@ -63,6 +176,7 @@ pub fn chain_append(base: &Chain, positions: impl IntoIterator<Item = Position>)
     chain
 }
 
+#[cfg(test)]
 fn materialize(chain: &Chain) -> Vec<JsString> {
     let mut segments = Vec::new();
     let mut node = chain.as_ref();
@@ -87,6 +201,9 @@ pub struct LocatedSpan {
 }
 
 impl LocatedSpan {
+    pub fn position(&self) -> Option<Position> {
+        self.chain.as_ref().map(|node| node.position.clone())
+    }
     pub fn new(start: usize, end: usize, is_key: bool, chain: Chain) -> Self {
         LocatedSpan { start, end, is_key, eligible: true, delim: Vec::new(), guard: None, unaddressed: false, chain }
     }
@@ -103,10 +220,7 @@ impl LocatedSpan {
         LocatedSpan { start, end, is_key, eligible, delim, guard, unaddressed: false, chain }
     }
 
-    pub fn chain(&self) -> &Chain {
-        &self.chain
-    }
-
+    #[cfg(test)]
     pub fn segments(&self) -> Vec<JsString> {
         materialize(&self.chain)
     }
@@ -115,6 +229,7 @@ impl LocatedSpan {
         self.chain.as_ref().map_or_else(Vec::new, |c| c.position.to_js())
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> JsString {
         js::join(&self.segments(), &[0x2E])
     }

@@ -18,7 +18,10 @@ fn decodes_to_blank(body: &[u16]) -> bool {
     if !REFERENCES_ONLY.test(body) {
         return false;
     }
-    let decoded = NUMERIC_REFERENCE.replace_with(&clear_special_chars(body.to_vec()), |c| {
+    let Ok(cleared) = clear_special_chars(body.to_vec()) else {
+        return false;
+    };
+    let decoded = NUMERIC_REFERENCE.replace_with(&cleared, |c| {
         let code = match c.get(1) {
             Some(decimal) => js::lossy(decimal).parse::<u32>().ok(),
             None => u32::from_str_radix(&js::lossy(c.s(2)), 16).ok(),

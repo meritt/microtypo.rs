@@ -8,7 +8,7 @@ use crate::cat;
 use crate::errors::{Error, Result};
 use crate::js::{self, JsString, Piece, Re};
 use crate::protect::placeholders::{CLOSE, OPEN, OPEN_UNIT, TAG_VAULT_KINDS};
-use crate::protect::tag_spans::{Reading, self_closing, tag_end, tag_ends_from};
+use crate::protect::tag_spans::{COMMENT_OPEN, CommentFor, Reading, self_closing, tag_end, tag_ends_from};
 use crate::protect::vault::Vault;
 use crate::protect::visible::shows_nothing;
 use crate::shared::block_tags::{BLOCK_TAG_NAMES, VOID_BLOCK_TAG_NAMES};
@@ -102,15 +102,17 @@ pub fn object_key_order<T>(entries: &mut [T], key: impl Fn(&T) -> &str) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SafeTags {
     reading: Reading,
+    comments: Option<CommentFor>,
     tag_vault: Vault,
     anchor_vault: Vault,
     block_vault: Vault,
     iblock_vault: Vault,
     hidden_iblock_vault: Vault,
     heads: [Vec<Option<Head>>; 3],
+    xml_names: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -124,13 +126,23 @@ impl SafeTags {
     pub fn new(document: bool) -> Self {
         SafeTags {
             reading: if document { Reading::Document } else { Reading::Fragment },
+            comments: None,
             tag_vault: Vault::new("T"),
             anchor_vault: Vault::new("A"),
             block_vault: Vault::new("L"),
             iblock_vault: Vault::new("I"),
             hidden_iblock_vault: Vault::new("H"),
             heads: [Vec::new(), Vec::new(), Vec::new()],
+            xml_names: false,
         }
+    }
+
+    pub fn set_comments(&mut self, comments: Option<CommentFor>) {
+        self.comments = comments;
+    }
+
+    pub fn set_xml_names(&mut self, xml_names: bool) {
+        self.xml_names = xml_names;
     }
 
     pub fn reset(&mut self) {
@@ -187,13 +199,23 @@ impl SafeTags {
         let mut out: Option<JsString> = None;
         let mut cursor = 0usize;
         let mut ends: Option<Vec<isize>> = None;
+        let mut read_comment = None;
         let mut lt = js::index_of_unit(text, 0x3C, 0);
         while let Some(at_lt) = lt {
             let at = if text.get(at_lt + 1) == Some(&0x2F) { at_lt + 2 } else { at_lt + 1 };
             let first = js::code_point_at(text, at);
-            if !is_tag_name_start(first) && first != Some(u32::from(OPEN_UNIT)) {
+            if !is_tag_name_start(first, self.xml_names) && first != Some(u32::from(OPEN_UNIT)) {
                 lt = js::index_of_unit(text, 0x3C, at_lt + 1);
                 continue;
+            }
+            if let Some(factory) = self.comments.as_ref()
+                && js::starts_with_at(text, COMMENT_OPEN, at_lt)
+            {
+                let read = read_comment.get_or_insert_with(|| factory(text, &|_| Ok(())));
+                if read(at_lt)?.is_none() {
+                    lt = js::index_of_unit(text, 0x3C, at_lt + 1);
+                    continue;
+                }
             }
             let gt = match &ends {
                 None => tag_end(text, at, self.reading),
@@ -222,14 +244,27 @@ impl SafeTags {
     }
 
     pub fn restore(&self, text: JsString) -> JsString {
-        VAULTED_TAG_RE.replace_owned(text, |c| {
-            let prefix = c.s(2)[0];
-            let id = js::parse_int(c.s(3)).and_then(|n| usize::try_from(n).ok());
-            match id.and_then(|id| self.vault(prefix)?.retrieve(id)) {
-                Some(value) => cat!("<", c.s(1), value, ">"),
-                None => c.whole().to_vec(),
-            }
-        })
+        self.restore_with(text, None)
+    }
+
+    pub fn restore_with(
+        &self,
+        text: JsString,
+        mapping: Option<&mut crate::shared::provenance::RestoreMap>,
+    ) -> JsString {
+        crate::shared::provenance::replace_recorded(
+            text,
+            &VAULTED_TAG_RE,
+            |c| {
+                let prefix = c.s(2)[0];
+                let id = js::parse_int(c.s(3)).and_then(|n| usize::try_from(n).ok());
+                match id.and_then(|id| self.vault(prefix)?.retrieve(id)) {
+                    Some(value) => cat!("<", c.s(1), value, ">"),
+                    None => c.whole().to_vec(),
+                }
+            },
+            mapping,
+        )
     }
 
     pub fn make_tag(&mut self, spec: TagSpec<'_>) -> Result<MadeTag> {
@@ -297,6 +332,14 @@ impl SafeTags {
         Vault::restore_fixpoint(&[&self.iblock_vault, &self.hidden_iblock_vault], text)
     }
 
+    pub fn restore_iblocks_with(
+        &self,
+        text: JsString,
+        mapping: &mut crate::shared::provenance::RestoreMap,
+    ) -> JsString {
+        Vault::restore_fixpoint_with(&[&self.iblock_vault, &self.hidden_iblock_vault], text, Some(mapping))
+    }
+
     pub fn find_by_tag_name(&mut self, matcher: &NameMatcher<'_>) -> Vec<(char, usize)> {
         let mut out = Vec::new();
         for (k, &prefix) in NAMED_KINDS.iter().enumerate() {
@@ -310,6 +353,20 @@ impl SafeTags {
             }
         }
         out
+    }
+
+    pub fn name_of(&mut self, prefix: u16, id: usize) -> Option<JsString> {
+        let k = NAMED_KINDS.iter().position(|&p| p == prefix)?;
+        self.fill_heads(k, prefix);
+        self.heads[k].get(id)?.as_ref().map(|head| js::to_lower(&head.name))
+    }
+
+    pub fn raw_of(&self, prefix: u16, id: usize) -> Option<&[u16]> {
+        if !NAMED_KINDS.contains(&prefix) {
+            return None;
+        }
+        let vault = self.vault(prefix)?;
+        if id >= vault.size() { None } else { vault.retrieve(id) }
     }
 
     fn fill_heads(&mut self, k: usize, prefix: u16) {
