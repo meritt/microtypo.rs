@@ -322,7 +322,7 @@ mod tests {
     use crate::js::u;
 
     fn message(s: &[u16]) -> String {
-        validate(s).err().map(|e| e.message).unwrap_or_default()
+        validate(s).err().map_or_default(|e| e.message)
     }
 
     #[test]

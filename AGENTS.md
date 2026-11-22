@@ -12,12 +12,12 @@ Rust port of [microtypo](https://github.com/meritt/microtypo). Output, `changes`
 
 ## Setup
 
-Toolchains are pinned by `rust-toolchain.toml`, `.nvmrc` and `packages/npm/package.json` (`devEngines`). Remove Homebrew `rust`: it shadows rustup.
+Toolchains are pinned by `rust-toolchain.toml` and `packages/npm/package.json` (`devEngines`: Node.js and pnpm). Remove Homebrew `rust`: it shadows rustup.
 
 ```bash
 cargo install wasm-bindgen-cli --version "$(cargo pkgid -p wasm-bindgen | cut -d@ -f2)" --locked --root target/tools
 brew install binaryen
-rustup toolchain install nightly-2026-11-01 --profile minimal --component miri,rust-src
+rustup toolchain install nightly-2026-11-20 --profile minimal --component miri,rust-src
 ```
 
 `wasm-opt` must report version 133.
@@ -26,14 +26,14 @@ rustup toolchain install nightly-2026-11-01 --profile minimal --component miri,r
 
 ```bash
 cargo fmt --all --check
-CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked
+CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --all-features --locked
 CARGO_BUILD_WARNINGS=deny cargo clippy -p microtypo-core -p microtypo-wasm --locked --target wasm32-unknown-unknown
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo xtask header --check
 cargo xtask corpus --check
 cargo deny --locked check
 cargo test --workspace --locked
-cargo +nightly-2026-11-01 miri test -p microtypo-ffi --no-default-features --lib --locked
+cargo +nightly-2026-11-20 miri test -p microtypo-ffi --no-default-features --lib --locked
 ```
 
 ## Conformance

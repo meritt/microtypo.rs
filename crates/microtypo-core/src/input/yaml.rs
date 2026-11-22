@@ -994,9 +994,7 @@ impl Scanner<'_> {
     }
 
     fn block_content_indent(&self, pos: usize, line_end: usize, indent: usize) -> isize {
-        for p in pos..line_end {
-            let ch = self.src[p];
-
+        for &ch in self.src.iter().take(line_end).skip(pos) {
             if (0x31..=0x39).contains(&ch) {
                 return (indent + usize::from(ch - 0x30)) as isize;
             }

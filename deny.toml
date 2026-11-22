@@ -3,6 +3,7 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+unmaintained = "all"
 
 [licenses]
 allow = ["Apache-2.0", "MIT", "MPL-2.0", "Unicode-3.0", "Zlib"]

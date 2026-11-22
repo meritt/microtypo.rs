@@ -315,7 +315,7 @@ impl SafeTags {
     fn fill_heads(&mut self, k: usize, prefix: u16) {
         let size = self.vault(prefix).map_or(0, Vault::size);
         for id in self.heads[k].len()..size {
-            let raw = self.vault(prefix).and_then(|v| v.retrieve(id)).map(<[u16]>::to_vec).unwrap_or_default();
+            let raw = self.vault(prefix).and_then(|v| v.retrieve(id)).map_or_default(<[u16]>::to_vec);
             let head = LEADING_NAME_RE.exec(&raw).map(|m| {
                 let wrapped = cat!("<", raw.as_slice(), ">");
                 Head {

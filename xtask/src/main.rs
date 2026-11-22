@@ -442,6 +442,7 @@ fn check_npm(tgz: &Path) -> Result {
     let consumer = root.join("target/staging/consumer/npm");
     fresh_dir(&consumer)?;
     write(&consumer.join("package.json"), "{ \"private\": true, \"type\": \"module\" }\n")?;
+    copy(&root.join("packages/npm/pnpm-workspace.yaml"), &consumer.join("pnpm-workspace.yaml"))?;
     run(Command::new("pnpm").args(["add", "--offline", "--ignore-scripts"]).arg(tgz).current_dir(&consumer))?;
     copy(&root.join("packages/npm/test/consumer.mjs"), &consumer.join("consumer.mjs"))?;
     run(Command::new("node").arg("consumer.mjs").current_dir(&consumer))?;

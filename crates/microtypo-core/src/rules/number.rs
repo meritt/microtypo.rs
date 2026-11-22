@@ -103,7 +103,7 @@ pub fn number_group() -> RuleGroupDef {
                     if p4 == [0x2D] {
                         return Ok(m.whole().to_vec());
                     }
-                    let next = m.input.get(m.end()).map(|c| vec![*c]).unwrap_or_default();
+                    let next = m.input.get(m.end()).map_or_default(|c| vec![*c]);
                     if p4 == [0x20] && DIGIT_RE.test(&next) {
                         return Ok(m.whole().to_vec());
                     }
