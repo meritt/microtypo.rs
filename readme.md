@@ -6,7 +6,7 @@
 
 ```toml
 [dependencies]
-microtypo-core = { git = "https://github.com/meritt/microtypo.rs", tag = "v0.2.0" }
+microtypo-core = { git = "https://github.com/meritt/microtypo.rs", tag = "v0.2.1" }
 getrandom = "0.4"
 serde_json = "1"
 ```
@@ -51,7 +51,7 @@ typo.process('"Амбер" - город'); // '«Амбер» — город'
 ## Swift
 
 ```swift
-.package(url: "https://github.com/meritt/microtypo.rs", exact: "0.2.0"),
+.package(url: "https://github.com/meritt/microtypo.rs", exact: "0.2.1"),
 ```
 
 ```swift
