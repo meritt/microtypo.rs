@@ -193,7 +193,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "microtypo-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "getrandom",
  "microtypo-core",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "microtypo-conformance"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "getrandom",
  "microtypo-core",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "microtypo-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "getrandom",
  "microtypo-conformance",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "microtypo-ffi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "getrandom",
  "microtypo-core",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "microtypo-wasm"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "getrandom",
  "js-sys",
@@ -530,7 +530,7 @@ checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cbindgen",
  "regress",

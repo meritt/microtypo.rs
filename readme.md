@@ -6,7 +6,7 @@
 
 ```toml
 [dependencies]
-microtypo-core = { git = "https://github.com/meritt/microtypo.rs", tag = "v0.2.0" }
+microtypo-core = { git = "https://github.com/meritt/microtypo.rs", tag = "v0.2.1" }
 getrandom = "0.4"
 serde_json = "1"
 ```
@@ -46,10 +46,12 @@ typo.process('"Амбер" - город'); // '«Амбер» — город'
 
 `load()` берёт `microtypo.wasm` рядом с модулем; можно передать URL, `Response`, байты или `WebAssembly.Module`. После успешной загрузки модуль один на realm: следующие вызовы возвращают тот же объект и аргумент не читают.
 
+В пакете два файла для браузера: `microtypo.js` и `microtypo.wasm`. `microtypo.js` — один модуль без статических импортов, поэтому его можно запустить и из Blob или `data:` URL, передав `load()` скомпилированный `WebAssembly.Module`.
+
 ## Swift
 
 ```swift
-.package(url: "https://github.com/meritt/microtypo.rs", exact: "0.2.0"),
+.package(url: "https://github.com/meritt/microtypo.rs", exact: "0.2.1"),
 ```
 
 ```swift

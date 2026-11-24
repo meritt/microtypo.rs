@@ -1,6 +1,6 @@
 {
   "name": "@meritt/microtypo-wasm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Russian typography that never mangles your code, URLs, or markup: the Rust port of microtypo in WebAssembly, with the JavaScript API of microtypo",
   "keywords": [
     "cyrillic",
@@ -34,7 +34,6 @@
     "./microtypo.wasm": "./microtypo.wasm"
   },
   "files": [
-    "glue.js",
     "microtypo.js",
     "microtypo.wasm"
   ],
