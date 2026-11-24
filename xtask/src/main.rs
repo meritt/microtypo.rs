@@ -24,6 +24,9 @@ const RELEASES: &str = "https://github.com/meritt/microtypo.rs/releases/download
 
 const BINARYEN: &str = "133";
 
+const GLUE_MARKER: &str = "/* @glue */";
+const GLUE_EXPORTS: &str = "\nexport { initSync, __wbg_init as default };\n";
+
 const WASM_OPT_FLAGS: [&str; 3] = ["-Os", "--strip-debug", "--strip-producers"];
 
 const WASM_GZIP_BUDGET: u64 = 800_000;
@@ -161,13 +164,26 @@ fn wasm() -> Result<PathBuf> {
     if glue.matches("'microtypo_wasm_bg.wasm'").count() != 1 {
         return Err("the wasm-bindgen glue needs one 'microtypo_wasm_bg.wasm'".to_owned());
     }
-    write(&dist.join("glue.js"), &glue.replace("'microtypo_wasm_bg.wasm'", "'microtypo.wasm'"))?;
+    if glue.matches(GLUE_EXPORTS).count() != 1 {
+        return Err(format!("the wasm-bindgen glue needs one {:?}", GLUE_EXPORTS.trim()));
+    }
+    // microtypo.js is one module without static imports: hosts run it from a Blob or data: URL,
+    // where './glue.js' does not resolve. The glue's exports become plain top-level declarations.
+    let glue = format!("\n{glue}")
+        .replace("'microtypo_wasm_bg.wasm'", "'microtypo.wasm'")
+        .replace(GLUE_EXPORTS, "\n")
+        .replace("\nexport class ", "\nclass ")
+        .replace("\nexport function ", "\nfunction ");
+    if let Some(line) = glue.lines().find(|line| line.starts_with("export ") || line.starts_with("import ")) {
+        return Err(format!("the wasm-bindgen glue has an unexpected module statement: {line}"));
+    }
     let template = root.join("packages/npm/src/microtypo.js");
     let text = fs::read_to_string(&template).map_err(at(template.display()))?;
-    if text.matches("'@VERSION@'").count() != 1 {
-        return Err(format!("{} needs one '@VERSION@'", template.display()));
+    if text.matches(GLUE_MARKER).count() != 1 || text.matches("'@VERSION@'").count() != 1 {
+        return Err(format!("{} needs one {GLUE_MARKER} and one '@VERSION@'", template.display()));
     }
-    write(&dist.join("microtypo.js"), &text.replace("'@VERSION@'", &format!("'{version}'")))?;
+    let text = text.replace(GLUE_MARKER, glue.trim()).replace("'@VERSION@'", &format!("'{version}'"));
+    write(&dist.join("microtypo.js"), &text)?;
     copy(&root.join("LICENSE"), &dist.join("LICENSE"))?;
     copy(&manifest, &dist.join("package.json"))?;
     Ok(dist)

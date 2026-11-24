@@ -34,7 +34,6 @@
     "./microtypo.wasm": "./microtypo.wasm"
   },
   "files": [
-    "glue.js",
     "microtypo.js",
     "microtypo.wasm"
   ],

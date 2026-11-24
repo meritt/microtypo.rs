@@ -146,4 +146,11 @@ assert.throws(() => budgeted.process(' '.repeat(60_000)), {
 
 assert.equal(await load(), api);
 
+const script = await readFile(new URL(import.meta.resolve('@meritt/microtypo-wasm')), 'utf8');
+assert.doesNotMatch(script, /^\s*import\s*[\w{*'"]|^\s*export\s[^;]*\sfrom\s/m);
+const hosted = await import(`data:text/javascript,${encodeURIComponent(`${script}\nexport function host() { return load; }\n`)}`);
+const standalone = await hosted.load(await WebAssembly.compile(await read()));
+assert.notEqual(standalone, api);
+assert.equal(new standalone.MicroTypo({ html: false }).process(text), expected);
+
 console.log(`@meritt/microtypo-wasm ${api.VERSION}: loads by ${kind}`);

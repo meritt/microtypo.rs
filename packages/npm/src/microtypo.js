@@ -1,4 +1,4 @@
-import { Engine, defaultMaxInputLength, initSync, version } from './glue.js';
+/* @glue */
 
 const VERSION = '@VERSION@';
 const MAX_ENTRIES = 100_000;
