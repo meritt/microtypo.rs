@@ -3,8 +3,8 @@
 import PackageDescription
 
 let release = (
-    url: "https://github.com/meritt/microtypo.rs/releases/download/v0.2.1/microtypo-v0.2.1-xcframework.zip",
-    checksum: "4a5f2e5fa8bc9535488b4a3ac79fcc746f1eb4ef5d2dc3da78f3ea95aa242cd4"
+    url: "https://github.com/meritt/microtypo.rs/releases/download/v0.2.2/microtypo-v0.2.2-xcframework.zip",
+    checksum: "ecbaaebaf7d5d640b6b8e68156993aa49096cd6825d4b111119d1b269238f772"
 )
 
 let settings: [SwiftSetting] = [
