@@ -57,6 +57,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - Attribute values (`input.attributes`) and HTML `<title>` bodies are typeset by worker engines: format `plain`, or `text` for a title body holding a tag or comment. A worker is built on first use, kept between calls with per-call state reset, rebuilt when `maxProcessingMs` changes, and takes the outer engine's groups, order, settings and cycle hook on each use; vaults read so far are passed in so their tokens stay inherited.
 - With `presets: false` nothing compiles the built-in groups; Miri depends on it.
 - Nesting depth is bounded only by `maxInputLength`, so no path may use stack in proportion to it: the key-path chains of JSON, TOML and YAML spans are freed in a loop, not by recursive `Drop`. `tests/behaviour/deep_nesting.rs` runs a million levels in a 2 MiB thread of a debug build.
+- A scan bounded by a position searches only up to it: searching the rest of the text on every call is quadratic on input with nothing to find, such as a run of straight quotes.
 
 ## Public surface
 
