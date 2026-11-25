@@ -4,6 +4,7 @@ mod config;
 mod data_rules;
 mod data_utf16;
 mod data_value_skip;
+mod deep_nesting;
 mod diagnostics;
 mod file_endings;
 mod frontmatter;

@@ -7,6 +7,7 @@ For any input and configuration, the engine returns the reference implementation
 Known divergences:
 
 - A lone surrogate in the `message` or `details` of an error is rendered as U+FFFD.
+- A TOML key path of a few hundred thousand segments (`a.a.….b = 1`, also in TOML frontmatter) makes the reference throw `RangeError: Maximum call stack size exceeded`, because `scanToml` spreads the segments into the arguments of one call; the port processes it.
 - `maxProcessingMs` also holds inside a regex search, so a stage the reference runs past the budget and only then reports ends here as soon as the budget is spent, with the same error.
 - Under `u` or `v`, a search from an index between the halves of a surrogate pair starts at the pair, as in V8 (`/./uy` from 2 in `a😀b` matches 1..3), but never tries the index itself: `/\B/uy` and `/(?<!a)/uy` from 2 and `/\B/gu` find an empty match at 2 in V8 and none here. regress reads the low half as a lone surrogate, so an attempt there would accept matches V8 rejects (`/(?<=[^a])/uy` from 2). No built-in expression in the corpus or the fuzzer needs a match between the halves.
 
@@ -55,6 +56,7 @@ Bindings depend on no workspace crate but the core. Core tests are `tests/behavi
 - State the reference keeps per run in module scope (boundary activity, quote padding, space collapse, quote paragraphs, inline tag names) lives in `Ctx::bound`, set by the engine and the runner.
 - Attribute values (`input.attributes`) and HTML `<title>` bodies are typeset by worker engines: format `plain`, or `text` for a title body holding a tag or comment. A worker is built on first use, kept between calls with per-call state reset, rebuilt when `maxProcessingMs` changes, and takes the outer engine's groups, order, settings and cycle hook on each use; vaults read so far are passed in so their tokens stay inherited.
 - With `presets: false` nothing compiles the built-in groups; Miri depends on it.
+- Nesting depth is bounded only by `maxInputLength`, so no path may use stack in proportion to it: the key-path chains of JSON, TOML and YAML spans are freed in a loop, not by recursive `Drop`. `tests/behaviour/deep_nesting.rs` runs a million levels in a 2 MiB thread of a debug build.
 
 ## Public surface
 
