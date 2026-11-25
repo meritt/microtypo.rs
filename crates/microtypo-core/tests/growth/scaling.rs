@@ -45,6 +45,11 @@ fn a_user_rule_matching_as_itself_in_one_run_scales_linearly() {
 }
 
 #[test]
+fn a_run_of_straight_quotes_scales_linearly() {
+    scales_linearly(None, "\"", 80_000);
+}
+
+#[test]
 fn repeated_abbreviations_scale_linearly() {
     scales_linearly(None, "т.е. ", 10_000);
 }

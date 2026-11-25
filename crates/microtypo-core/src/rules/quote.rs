@@ -87,11 +87,9 @@ fn ends_before(cx: &QuoteTags<'_>, source: &[u16], raw: &[u16], from: usize, to:
         return false;
     }
     let name = &raw[..name_len];
+    let window = &source[..source.len().min(to + 1)];
     let mut at = from;
-    while let Some(found) = js::index_of(source, &[0x3C, 0x2F], at) {
-        if found >= to {
-            break;
-        }
+    while let Some(found) = js::index_of(window, &[0x3C, 0x2F], at) {
         if let Some(tag_end) = native_tag_end(source, found)
             && cx.raw(js::slice(source, found + 2, tag_end - 1)) == Some(name)
         {
@@ -103,11 +101,9 @@ fn ends_before(cx: &QuoteTags<'_>, source: &[u16], raw: &[u16], from: usize, to:
 }
 
 fn node_between(cx: &QuoteTags<'_>, source: &[u16], from: usize, to: usize) -> bool {
+    let window = &source[..source.len().min(to)];
     let mut at = from;
-    while let Some(found) = js::index_of(source, &[0x3C], at) {
-        if found >= to {
-            break;
-        }
+    while let Some(found) = js::index_of_unit(window, 0x3C, at) {
         if let Some(tag_end) = native_tag_end(source, found)
             && cx
                 .raw(js::slice(source, found + 1, tag_end - 1))

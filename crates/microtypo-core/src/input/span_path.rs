@@ -165,6 +165,15 @@ impl ChainNode {
     }
 }
 
+impl Drop for ChainNode {
+    fn drop(&mut self) {
+        let mut next = self.parent.take();
+        while let Some(node) = next {
+            next = Arc::into_inner(node).and_then(|mut node| node.parent.take());
+        }
+    }
+}
+
 pub type Chain = Option<Arc<ChainNode>>;
 
 pub fn chain_append(base: &Chain, positions: impl IntoIterator<Item = Position>) -> Chain {

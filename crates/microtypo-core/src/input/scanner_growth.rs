@@ -1,4 +1,5 @@
 use std::hint::black_box;
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::input::localization::localization_scanner;
@@ -10,23 +11,29 @@ use crate::shared::line_endings::restore_file_tail;
 type Shape = (&'static str, &'static str, fn(usize) -> String);
 type PragmaShape = (&'static str, fn(usize) -> String);
 
+const ROUNDS: usize = 5;
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
 fn sample(source: &[u16], repeats: usize, action: &mut impl FnMut(&[u16])) -> f64 {
-    let mut best = f64::INFINITY;
-    for _ in 0..3 {
-        let start = Instant::now();
-        for _ in 0..repeats {
-            action(black_box(source));
-        }
-        best = best.min(start.elapsed().as_secs_f64() * 1000.0);
+    let start = Instant::now();
+    for _ in 0..repeats {
+        action(black_box(source));
     }
-    best
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 fn growth(name: &str, build: fn(usize) -> String, count: usize, repeats: usize, mut action: impl FnMut(&[u16])) {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
     let count = if cfg!(debug_assertions) { count / 4 } else { count };
     let sources = [count, 2 * count, 4 * count].map(|n| js::u(&build(n)));
     sample(&sources[0], repeats, &mut action);
-    let [one, two, four] = sources.each_ref().map(|source| sample(source, repeats, &mut action));
+    let mut best = [f64::INFINITY; 3];
+    for _ in 0..ROUNDS {
+        for (best, source) in best.iter_mut().zip(&sources) {
+            *best = best.min(sample(source, repeats, &mut action));
+        }
+    }
+    let [one, two, four] = best;
     eprintln!(
         "{name}: units {:?}; N={count} {one:.3} ms, 2N {two:.3} ms, 4N {four:.3} ms",
         sources.each_ref().map(Vec::len)
